@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Horizon, TransactionBuilder, Networks, Operation, Contract, Address, rpc, scValToNative, nativeToScVal } from '@stellar/stellar-sdk'
 import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit'
 
@@ -38,6 +38,59 @@ function App() {
   const [goal, setGoal] = useState('0')
   const [recentDonors, setRecentDonors] = useState([])
   const [donationCount, setDonationCount] = useState(0)
+  const canvasRef = useRef(null)
+
+  const fireConfetti = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+
+    const particles = []
+    const colors = ['#38bdf8', '#818cf8', '#f472b6', '#34d399', '#fbbf24', '#f87171']
+
+    for (let i = 0; i < 150; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: canvas.height + Math.random() * 100,
+        w: Math.random() * 10 + 5,
+        h: Math.random() * 6 + 3,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        vx: (Math.random() - 0.5) * 6,
+        vy: -(Math.random() * 12 + 8),
+        gravity: 0.15,
+        rotation: Math.random() * 360,
+        rotSpeed: (Math.random() - 0.5) * 10,
+      })
+    }
+
+    let frame = 0
+    const maxFrames = 180
+    const animate = () => {
+      if (frame >= maxFrames) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        return
+      }
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      particles.forEach((p) => {
+        p.vy += p.gravity
+        p.x += p.vx
+        p.y += p.vy
+        p.rotation += p.rotSpeed
+        p.vx *= 0.99
+        ctx.save()
+        ctx.translate(p.x, p.y)
+        ctx.rotate((p.rotation * Math.PI) / 180)
+        ctx.fillStyle = p.color
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h)
+        ctx.restore()
+      })
+      frame++
+      requestAnimationFrame(animate)
+    }
+    animate()
+  }
 
   const fetchBalance = async (pk) => {
     try {
@@ -188,6 +241,7 @@ function App() {
 
       setTxHash(result.hash)
       setStatus('Donation successful!')
+      fireConfetti()
 
       const stored = localStorage.getItem('crowdfund_donations')
       const donations = stored ? JSON.parse(stored) : []
@@ -311,6 +365,7 @@ function App() {
 
   return (
     <div style={s.wrap}>
+      <canvas ref={canvasRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 9999 }} />
       <header style={s.header}>
         <span style={s.title}>Stellar Crowdfund</span>
         {publicKey ? (
