@@ -1,137 +1,27 @@
-import { useState, useEffect, useCallback } from 'react'
-import { requestAccess, signTransaction } from '@stellar/freighter-api'
+import { useState, useEffect } from 'react'
 import { Horizon, TransactionBuilder, Asset, Networks, Operation } from '@stellar/stellar-sdk'
+import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit'
+
+import { FreighterModule, FREIGHTER_ID } from '@creit.tech/stellar-wallets-kit/modules/freighter'
+import { AlbedoModule, ALBEDO_ID } from '@creit.tech/stellar-wallets-kit/modules/albedo'
+import { LobstrModule, LOBSTR_ID } from '@creit.tech/stellar-wallets-kit/modules/lobstr'
+import { xBullModule, XBULL_ID } from '@creit.tech/stellar-wallets-kit/modules/xbull'
+import { RabetModule, RABET_ID } from '@creit.tech/stellar-wallets-kit/modules/rabet'
+import { HanaModule, HANA_ID } from '@creit.tech/stellar-wallets-kit/modules/hana'
 
 const SERVER = new Horizon.Server('https://horizon-testnet.stellar.org')
 
-function Confetti({ active }) {
-  const [pieces, setPieces] = useState([])
-
-  useEffect(() => {
-    if (!active) { setPieces([]); return }
-    const colors = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#f43f5e', '#8b5cf6']
-    const newPieces = Array.from({ length: 80 }, (_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      delay: Math.random() * 0.8,
-      duration: 1.5 + Math.random() * 1.5,
-      rotation: Math.random() * 360,
-      size: 6 + Math.random() * 8,
-    }))
-    setPieces(newPieces)
-  }, [active])
-
-  if (!active || pieces.length === 0) return null
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9999, overflow: 'hidden' }}>
-      {pieces.map(p => (
-        <div
-          key={p.id}
-          style={{
-            position: 'absolute',
-            left: `${p.left}%`,
-            top: '-20px',
-            width: `${p.size}px`,
-            height: `${p.size * 0.6}px`,
-            background: p.color,
-            borderRadius: '2px',
-            animation: `confettiFall ${p.duration}s ease-in ${p.delay}s forwards`,
-            transform: `rotate(${p.rotation}deg)`,
-          }}
-        />
-      ))}
-      <style>{`
-        @keyframes confettiFall {
-          0% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
-          50% { opacity: 1; }
-          100% { opacity: 0; transform: translateY(100vh) rotate(720deg) scale(0.5); }
-        }
-      `}</style>
-    </div>
-  )
-}
-
-function SuccessOverlay({ show, hash, onClose }) {
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    if (show) {
-      setTimeout(() => setVisible(true), 50)
-    } else {
-      setVisible(false)
-    }
-  }, [show])
-
-  if (!show) return null
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 9998,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        opacity: visible ? 1 : 0,
-        transition: 'opacity 0.3s ease',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'white', borderRadius: '16px', padding: '40px',
-          textAlign: 'center', maxWidth: '380px', width: '90%',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-          transform: visible ? 'scale(1)' : 'scale(0.8)',
-          transition: 'transform 0.3s ease',
-        }}
-      >
-        <div style={{
-          width: '64px', height: '64px', borderRadius: '50%',
-          background: '#eef2ff', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', margin: '0 auto 16px',
-        }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </div>
-        <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a2e', marginBottom: '8px' }}>
-          Transaction Successful!
-        </h3>
-        <p style={{ fontSize: '13px', color: '#888', marginBottom: '16px' }}>
-          Your XLM has been sent on the Stellar testnet.
-        </p>
-        {hash && (
-          <a
-            href={`https://stellar.expert/explorer/testnet/tx/${hash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'inline-block', fontSize: '11px', color: '#6366f1',
-              fontFamily: 'monospace', wordBreak: 'break-all',
-              textDecoration: 'none', background: '#f0f0ff',
-              padding: '8px 12px', borderRadius: '6px', marginBottom: '20px',
-            }}
-          >
-            {hash}
-          </a>
-        )}
-        <br />
-        <button
-          onClick={onClose}
-          style={{
-            background: '#6366f1', color: 'white', border: 'none',
-            padding: '10px 32px', borderRadius: '8px', fontSize: '14px',
-            fontWeight: 600, cursor: 'pointer', marginTop: '8px',
-          }}
-        >
-          OK
-        </button>
-      </div>
-    </div>
-  )
-}
+const kit = StellarWalletsKit.init({
+  modules: [
+    new FreighterModule(),
+    new AlbedoModule(),
+    new LobstrModule(),
+    new xBullModule(),
+    new RabetModule(),
+    new HanaModule(),
+  ],
+  network: Networks.TESTNET,
+})
 
 function App() {
   const [publicKey, setPublicKey] = useState(null)
@@ -141,8 +31,17 @@ function App() {
   const [status, setStatus] = useState('')
   const [txHash, setTxHash] = useState('')
   const [isSending, setIsSending] = useState(false)
-  const [showConfetti, setShowConfetti] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
+  const [walletName, setWalletName] = useState('')
+
+  useEffect(() => {
+    const unsub = StellarWalletsKit.on('STATE_UPDATE', (e) => {
+      if (e.payload.address) {
+        setPublicKey(e.payload.address)
+        fetchBalance(e.payload.address)
+      }
+    })
+    return () => unsub()
+  }, [])
 
   const fetchBalance = async (pk) => {
     try {
@@ -156,30 +55,30 @@ function App() {
   }
 
   const connectWallet = async () => {
-    setStatus('Connecting...')
     try {
-      const result = await requestAccess()
-      if (result.error) {
-        throw new Error(result.error.message)
+      const { address } = await StellarWalletsKit.authModal()
+      if (StellarWalletsKit.selectedModule) {
+        const module = StellarWalletsKit.selectedModule
+        setWalletName(module.productName || 'Wallet')
       }
-      setPublicKey(result.address)
-      await fetchBalance(result.address)
+      setPublicKey(address)
+      await fetchBalance(address)
       setStatus('')
     } catch (error) {
       console.error("Wallet connection failed", error)
-      setStatus('Connection failed. Make sure Freighter is installed and set to Testnet.')
+      setStatus('Connection failed. Please ensure a wallet is available.')
     }
   }
 
   const disconnectWallet = () => {
+    StellarWalletsKit.disconnect()
     setPublicKey(null)
     setBalance(null)
     setDestination('')
     setAmount('')
     setStatus('')
     setTxHash('')
-    setShowConfetti(false)
-    setShowSuccess(false)
+    setWalletName('')
   }
 
   const sendTransaction = async () => {
@@ -214,30 +113,19 @@ function App() {
         .build()
 
       setStatus('Waiting for wallet signature...')
-      const signResult = await signTransaction(transaction.toXDR(), {
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(transaction.toXDR(), {
         networkPassphrase: Networks.TESTNET,
       })
 
-      if (signResult.error) {
-        throw new Error(signResult.error.message)
-      }
-
       setStatus('Submitting to network...')
-      const signedTx = TransactionBuilder.fromXDR(
-        signResult.signedTxXdr,
-        Networks.TESTNET
-      )
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
       const result = await SERVER.submitTransaction(signedTx)
 
       setTxHash(result.hash)
-      setStatus('')
-      setShowConfetti(true)
-      setShowSuccess(true)
+      setStatus('Transaction successful!')
       await fetchBalance(publicKey)
       setDestination('')
       setAmount('')
-
-      setTimeout(() => setShowConfetti(false), 4000)
     } catch (error) {
       console.error("Transaction failed", error)
       const msg = error.message || String(error)
@@ -309,13 +197,6 @@ function App() {
 
   return (
     <div style={s.wrap}>
-      <Confetti active={showConfetti} />
-      <SuccessOverlay
-        show={showSuccess}
-        hash={txHash}
-        onClose={() => setShowSuccess(false)}
-      />
-
       <header style={s.header}>
         <span style={s.title}>Stellar Payment dApp</span>
         {publicKey ? (
@@ -325,7 +206,7 @@ function App() {
             <button style={s.disconnectBtn} onClick={disconnectWallet}>Disconnect</button>
           </div>
         ) : (
-          <button style={s.connectBtn} onClick={connectWallet}>Connect Freighter</button>
+          <button style={s.connectBtn} onClick={connectWallet}>Connect Wallet</button>
         )}
       </header>
 
