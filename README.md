@@ -1,27 +1,51 @@
-# Stellar Payment dApp
+# Stellar Crowdfund dApp
 
-A simple payment application built on the Stellar network testnet. Part of the **Stellar Journey To Mastery - Monthly Builder Challenge (Level 1 - White Belt)**.
+A decentralized crowdfunding application built on the Stellar testnet using a Soroban smart contract. Part of the **Stellar Journey To Mastery - Monthly Builder Challenge (Level 2 - Yellow Belt)**.
+
+## Live Demo
+
+[View Live App](https://stellar-payment-dapp.vercel.app)
 
 ## Features
 
-- **Wallet Connection** — Connect and disconnect Freighter wallet
-- **Balance Display** — Real-time XLM balance in the header
-- **Send XLM** — Send XLM to any Stellar testnet address
-- **Transaction Feedback** — Success popup with confetti effect and transaction hash link to Stellar Explorer
-- **Error Handling** — Clear error messages for failed or rejected transactions
+- **Multi-Wallet Support** — Connect with Freighter, Albedo, LOBSTR, xBull, Rabet, or Hana Wallet via StellarWalletsKit
+- **Smart Contract** — Soroban contract deployed on testnet for on-chain donation tracking
+- **Donate XLM** — Donate to the crowdfund campaign directly from your wallet
+- **Real-Time Progress** — Live raised amount, goal, and progress bar synced from contract state
+- **Recent Donations** — Track latest donations with address, amount, and timestamp
+- **Confetti Animation** — Celebration effect on successful donation
+- **Transaction Status** — Visible status updates (Building → Signing → Submitting → Success)
+- **Error Handling** — 3 error types: wallet rejected, insufficient balance, account not found
+
+## Smart Contract
+
+- **Contract Address:** `CDVCR252R3SL4DDLTAX6XZ4G7K2EZAN5EURMNFYUNVM6A7ABVP5HRTLD`
+- **Deploy TX:** [View on Explorer](https://stellar.expert/explorer/testnet/tx/6fa23c30cba7cfd105f89a924a05dea22b1d2a8bfe7a41d315cb62455b16d51)
+- **Functions:**
+  - `initialize(admin, goal)` — Set admin and funding goal
+  - `donate(donor, amount)` — Donate XLM to the campaign
+  - `get_total_raised()` — Read total donations
+  - `get_goal()` — Read funding goal
+
+### Example Contract Call
+
+Donation TX (verifiable on Stellar Explorer):
+`7d183d086c3f4747f2bf2491b6fa01cccab45395e482c88c29e3c67130467925`
+→ [View on Stellar Explorer](https://stellar.expert/explorer/testnet/tx/7d183d086c3f4747f2bf2491b6fa01cccab45395e482c88c29e3c67130467925)
 
 ## Tech Stack
 
 - **Frontend:** React + Vite
-- **Styling:** Inline Styles
-- **Stellar SDK:** `@stellar/stellar-sdk`
-- **Wallet:** `@stellar/freighter-api`
+- **Styling:** Inline Styles (dark theme)
+- **Stellar SDK:** `@stellar/stellar-sdk` v16
+- **Wallet Kit:** `@creit.tech/stellar-wallets-kit` v2.4.0
+- **Smart Contract:** Soroban (Rust)
 
 ## Setup
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/stellar-payment-dapp.git
+   git clone https://github.com/EnesPacaci/stellar-payment-dapp.git
    ```
 2. Install dependencies:
    ```bash
@@ -36,20 +60,17 @@ A simple payment application built on the Stellar network testnet. Part of the *
 
 ## Prerequisites
 
-- [Freighter](https://chromewebstore.google.com/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk) browser extension installed
-- Freighter set to **Testnet**
+- A Stellar wallet extension installed (Freighter recommended)
+- Wallet set to **Testnet**
 - A funded testnet account (get test XLM from [friendbot.stellar.org](https://friendbot.stellar.org))
 
 ## Screenshots
 
-### Wallet Disconnected
-![Disconnected](screenshots/disconnected.png)
+### Wallet Options Modal
+![Wallet Options](screenshots/wallet_options_modal.png)
 
-### Wallet Connected + Balance
-![Connected](screenshots/connected.png)
+### Donate Sending (Freighter Confirmation)
+![Sending](screenshots/donate_sending.png)
 
-### Sending Transaction (Freighter Popup)
-![Sending](screenshots/sending.png)
-
-### Transaction Successful (Confetti + Hash)
-![Success](screenshots/success.png)
+### Donate Success (Confetti + Explorer Link)
+![Success](screenshots/donate_success.png)
