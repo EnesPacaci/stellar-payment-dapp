@@ -37,6 +37,7 @@ function App() {
   const [totalRaised, setTotalRaised] = useState('0')
   const [goal, setGoal] = useState('0')
   const [recentDonors, setRecentDonors] = useState([])
+  const [donationCount, setDonationCount] = useState(0)
 
   const fetchBalance = async (pk) => {
     try {
@@ -85,26 +86,14 @@ function App() {
 
   const fetchRecentDonors = useCallback(async () => {
     try {
-      const payments = await HORIZON_SERVER.payments()
-        .limit(20)
-        .order('desc')
-        .call()
-
-      const donors = []
-      for (const record of payments._records) {
-        if (record.type === 'payment' && record.asset_type === 'native') {
-          donors.push({
-            address: record.from,
-            amount: record.amount,
-            tx: record.transaction_hash,
-            time: record.created_at,
-          })
-        }
-        if (donors.length >= 5) break
+      const stored = localStorage.getItem('crowdfund_donations')
+      if (stored) {
+        const donations = JSON.parse(stored)
+        setDonationCount(donations.length)
+        setRecentDonors(donations.slice(0, 5))
       }
-      setRecentDonors(donors)
     } catch (error) {
-      console.error("Events fetch failed", error)
+      console.error("Failed to load donations:", error)
     }
   }, [])
 
@@ -199,6 +188,17 @@ function App() {
 
       setTxHash(result.hash)
       setStatus('Donation successful!')
+
+      const stored = localStorage.getItem('crowdfund_donations')
+      const donations = stored ? JSON.parse(stored) : []
+      donations.unshift({
+        address: publicKey,
+        amount: String(amountStroops),
+        tx: result.hash,
+        time: new Date().toISOString(),
+      })
+      localStorage.setItem('crowdfund_donations', JSON.stringify(donations))
+
       await fetchBalance(publicKey)
       await fetchContractData()
       await fetchRecentDonors()
@@ -336,7 +336,7 @@ function App() {
               <div style={s.statLabel}>Goal (XLM)</div>
             </div>
             <div style={s.statBox}>
-              <div style={s.statValue}>{recentDonors.length}</div>
+              <div style={s.statValue}>{donationCount}</div>
               <div style={s.statLabel}>Donations</div>
             </div>
           </div>
@@ -403,7 +403,7 @@ function App() {
                     <div style={s.donorAddr}>{d.address.slice(0, 6)}...{d.address.slice(-4)}</div>
                     <div style={s.donorTime}>{new Date(d.time).toLocaleString()}</div>
                   </div>
-                  <div style={s.donorAmount}>{(parseFloat(d.amount)).toFixed(2)} XLM</div>
+                  <div style={s.donorAmount}>{(parseFloat(d.amount) / 10_000_000).toFixed(2)} XLM</div>
                 </div>
               ))
             ) : (
