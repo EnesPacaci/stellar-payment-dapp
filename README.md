@@ -27,6 +27,22 @@ A decentralized crowdfunding application built on the Stellar testnet using a So
   - `get_total_raised()` — Read total donations
   - `get_goal()` — Read funding goal
 
+### Source Code
+
+The smart contract source files are in the `contract/` directory:
+
+```
+contract/
+├── Cargo.toml                   # Workspace config
+├── contracts/
+│   └── hello-world/
+│       ├── Cargo.toml            # Contract dependencies
+│       ├── Makefile              # Build helper
+│       └── src/
+│           ├── lib.rs            # Contract logic
+│           └── test.rs           # Unit tests
+```
+
 ### Example Contract Call
 
 Donation TX (verifiable on Stellar Explorer):
