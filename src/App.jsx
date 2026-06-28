@@ -1,13 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Horizon, TransactionBuilder, Networks, Operation, Contract, Address, rpc, scValToNative, nativeToScVal } from '@stellar/stellar-sdk'
+import { Horizon, TransactionBuilder, Networks, Contract, Address, rpc, scValToNative, nativeToScVal } from '@stellar/stellar-sdk'
 import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit'
-
 import { FreighterModule } from '@creit.tech/stellar-wallets-kit/modules/freighter'
 import { AlbedoModule } from '@creit.tech/stellar-wallets-kit/modules/albedo'
 import { LobstrModule } from '@creit.tech/stellar-wallets-kit/modules/lobstr'
 import { xBullModule } from '@creit.tech/stellar-wallets-kit/modules/xbull'
 import { RabetModule } from '@creit.tech/stellar-wallets-kit/modules/rabet'
 import { HanaModule } from '@creit.tech/stellar-wallets-kit/modules/hana'
+
+import useStore from './store'
+import Header from './components/Header'
+import CampaignCard from './components/CampaignCard'
+import DonateForm from './components/DonateForm'
+import RecentDonations from './components/RecentDonations'
+import CreateCampaign from './components/CreateCampaign'
 
 const HORIZON_SERVER = new Horizon.Server('https://horizon-testnet.stellar.org')
 const SOROBAN_SERVER = new rpc.Server('https://soroban-testnet.stellar.org')
@@ -27,18 +33,12 @@ const kit = StellarWalletsKit.init({
 })
 
 function App() {
-  const [publicKey, setPublicKey] = useState(null)
-  const [balance, setBalance] = useState(null)
-  const [amount, setAmount] = useState('')
-  const [status, setStatus] = useState('')
-  const [txHash, setTxHash] = useState('')
-  const [isSending, setIsSending] = useState(false)
-  const [walletName, setWalletName] = useState('')
-  const [totalRaised, setTotalRaised] = useState('0')
-  const [goal, setGoal] = useState('0')
-  const [recentDonors, setRecentDonors] = useState([])
-  const [donationCount, setDonationCount] = useState(0)
   const canvasRef = useRef(null)
+  const {
+    setPublicKey, setBalance, setWalletName, setStatus, setTxHash,
+    setIsSending, setTotalRaised, setGoal, setRecentDonors,
+    setDonationCount, resetWallet, publicKey,
+  } = useStore()
 
   const fireConfetti = () => {
     const canvas = canvasRef.current
@@ -92,16 +92,15 @@ function App() {
     animate()
   }
 
-  const fetchBalance = async (pk) => {
+  const fetchBalance = useCallback(async (pk) => {
     try {
       const account = await HORIZON_SERVER.loadAccount(pk)
       const nativeBalance = account.balances.find((b) => b.asset_type === 'native')
       setBalance(nativeBalance.balance)
-    } catch (error) {
-      console.error("Balance fetch failed", error)
+    } catch {
       setBalance('0')
     }
-  }
+  }, [setBalance])
 
   const invokeRead = useCallback(async (method, ...args) => {
     try {
@@ -127,15 +126,16 @@ function App() {
 
   const fetchContractData = useCallback(async () => {
     try {
-      const goalResult = await invokeRead('get_goal')
-      const raisedResult = await invokeRead('get_total_raised')
-
-      if (goalResult !== null && goalResult !== undefined) setGoal(String(goalResult))
-      if (raisedResult !== null && raisedResult !== undefined) setTotalRaised(String(raisedResult))
-    } catch (error) {
-      console.error("Contract read failed", error)
+      const [goalResult, raisedResult] = await Promise.all([
+        invokeRead('get_goal'),
+        invokeRead('get_total_raised'),
+      ])
+      if (goalResult != null) setGoal(String(goalResult))
+      if (raisedResult != null) setTotalRaised(String(raisedResult))
+    } catch {
+      console.error('Contract read failed')
     }
-  }, [invokeRead])
+  }, [invokeRead, setGoal, setTotalRaised])
 
   const fetchRecentDonors = useCallback(async () => {
     try {
@@ -145,10 +145,8 @@ function App() {
         setDonationCount(donations.length)
         setRecentDonors(donations.slice(0, 5))
       }
-    } catch (error) {
-      console.error("Failed to load donations:", error)
-    }
-  }, [])
+    } catch {}
+  }, [setDonationCount, setRecentDonors])
 
   useEffect(() => {
     fetchContractData()
@@ -168,35 +166,29 @@ function App() {
       }
     })
     return () => unsub()
-  }, [])
+  }, [setPublicKey, fetchBalance])
 
   const connectWallet = async () => {
     try {
       const { address } = await StellarWalletsKit.authModal()
       if (StellarWalletsKit.selectedModule) {
-        const module = StellarWalletsKit.selectedModule
-        setWalletName(module.productName || 'Wallet')
+        setWalletName(StellarWalletsKit.selectedModule.productName || 'Wallet')
       }
       setPublicKey(address)
       await fetchBalance(address)
       setStatus('')
-    } catch (error) {
-      console.error("Wallet connection failed", error)
+    } catch {
       setStatus('Connection failed. Please ensure a wallet is available.')
     }
   }
 
   const disconnectWallet = () => {
     StellarWalletsKit.disconnect()
-    setPublicKey(null)
-    setBalance(null)
-    setAmount('')
-    setStatus('')
-    setTxHash('')
-    setWalletName('')
+    resetWallet()
   }
 
   const sendTransaction = async () => {
+    const amount = useStore.getState().amount
     if (!amount || parseFloat(amount) <= 0) {
       setStatus('Please enter a valid amount')
       return
@@ -256,11 +248,11 @@ function App() {
       await fetchBalance(publicKey)
       await fetchContractData()
       await fetchRecentDonors()
-      setAmount('')
+      useStore.getState().setAmount('')
     } catch (error) {
-      console.error("Transaction failed", error)
+      console.error('Transaction failed', error)
       const msg = error.message || String(error)
-      if (msg.includes('user rejected') || msg.includes('rejected')) {
+      if (msg.includes('rejected')) {
         setStatus('Transaction rejected by user.')
       } else if (msg.includes('account') && msg.includes('not found')) {
         setStatus('Account not found on testnet. Get XLM from friendbot first.')
@@ -274,199 +266,61 @@ function App() {
     }
   }
 
-  const isError = status && (status.startsWith('Error') || status.includes('failed') || status.includes('rejected') || status.includes('not found') || status.includes('Insufficient'))
-
-  const goalXLM = parseFloat(goal) / 10_000_000
-  const raisedXLM = parseFloat(totalRaised) / 10_000_000
-  const progressPct = goalXLM > 0 ? Math.min((raisedXLM / goalXLM) * 100, 100) : 0
-
-  const s = {
-    wrap: { minHeight: '100vh', background: '#0f172a' },
-    header: {
-      background: '#1e293b',
-      color: 'white',
-      padding: '14px 24px',
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      borderBottom: '1px solid #334155',
-    },
-    title: { fontWeight: 700, fontSize: '17px', letterSpacing: '-0.3px', color: '#38bdf8' },
-    walletRow: { display: 'flex', alignItems: 'center', gap: '14px' },
-    balanceHeader: { fontSize: '13px', opacity: 0.85, fontFamily: 'monospace' },
-    addr: { fontSize: '13px', opacity: 0.7, fontFamily: 'monospace', background: 'rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '4px' },
-    connectBtn: {
-      background: '#38bdf8', color: '#0f172a', border: 'none',
-      padding: '8px 20px', borderRadius: '6px', cursor: 'pointer',
-      fontSize: '14px', fontWeight: 600,
-    },
-    disconnectBtn: {
-      background: 'transparent', color: 'white',
-      border: '1px solid rgba(255,255,255,0.25)',
-      padding: '6px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
-    },
-    main: { maxWidth: 520, margin: '48px auto', padding: '0 20px' },
-    card: {
-      background: '#1e293b', borderRadius: '12px',
-      padding: '32px', boxShadow: '0 2px 16px rgba(0,0,0,0.3)',
-      border: '1px solid #334155',
-    },
-    statsRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '24px' },
-    statBox: { textAlign: 'center', flex: 1 },
-    statValue: { fontSize: '22px', fontWeight: 700, color: '#38bdf8', fontFamily: 'monospace' },
-    statLabel: { fontSize: '12px', color: '#94a3b8', marginTop: '4px' },
-    progressBar: {
-      width: '100%', height: '12px', background: '#334155',
-      borderRadius: '6px', overflow: 'hidden', marginBottom: '8px',
-    },
-    progressFill: {
-      height: '100%', background: 'linear-gradient(90deg, #38bdf8, #818cf8)',
-      borderRadius: '6px', transition: 'width 0.5s ease', width: `${progressPct}%`,
-    },
-    progressText: { fontSize: '13px', color: '#94a3b8', marginBottom: '24px', textAlign: 'right' },
-    desc: { color: '#94a3b8', fontSize: '14px', marginBottom: '24px', lineHeight: '1.6' },
-    label: { display: 'block', fontSize: '13px', fontWeight: 500, color: '#cbd5e1', marginBottom: '6px' },
-    input: {
-      width: '100%', padding: '11px 14px', border: '1px solid #334155',
-      borderRadius: '8px', fontSize: '14px', marginBottom: '16px',
-      outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace',
-      transition: 'border 0.2s', background: '#0f172a', color: 'white',
-    },
-    sendBtn: {
-      width: '100%', background: '#38bdf8', color: '#0f172a', border: 'none',
-      padding: '12px', borderRadius: '8px', fontSize: '14px', fontWeight: 600,
-      cursor: 'pointer', marginTop: '4px', letterSpacing: '0.2px',
-    },
-    sendBtnDisabled: {
-      width: '100%', background: '#334155', color: '#64748b', border: 'none',
-      padding: '12px', borderRadius: '8px', fontSize: '14px', fontWeight: 600,
-      cursor: 'not-allowed', marginTop: '4px',
-    },
-    status: { marginTop: '14px', fontSize: '13px', color: '#94a3b8', textAlign: 'center' },
-    error: { marginTop: '14px', fontSize: '13px', color: '#f87171', textAlign: 'center' },
-    prompt: { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
-    donorsSection: { marginTop: '24px', borderTop: '1px solid #334155', paddingTop: '20px' },
-    donorsTitle: { fontSize: '14px', fontWeight: 600, color: '#cbd5e1', marginBottom: '12px' },
-    donorRow: {
-      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      padding: '8px 0', borderBottom: '1px solid #1e293b',
-    },
-    donorAddr: { fontSize: '12px', fontFamily: 'monospace', color: '#94a3b8' },
-    donorAmount: { fontSize: '13px', fontWeight: 600, color: '#38bdf8' },
-    donorTime: { fontSize: '11px', color: '#64748b' },
-    noDonors: { fontSize: '13px', color: '#64748b', textAlign: 'center', padding: '16px' },
-    quickBtns: { display: 'flex', gap: '8px', marginBottom: '16px' },
-    quickBtn: {
-      flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #334155',
-      background: 'transparent', color: '#38bdf8', cursor: 'pointer',
-      fontSize: '13px', fontWeight: 500,
-    },
-  }
+  const status = useStore((s) => s.status)
+  const txHash = useStore((s) => s.txHash)
+  const isError = status &&
+    (status.startsWith('Error') ||
+     status.includes('failed') ||
+     status.includes('rejected') ||
+     status.includes('not found') ||
+     status.includes('Insufficient'))
 
   return (
-    <div style={s.wrap}>
-      <canvas ref={canvasRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 9999 }} />
-      <header style={s.header}>
-        <span style={s.title}>Stellar Crowdfund</span>
-        {publicKey ? (
-          <div style={s.walletRow}>
-            <span style={s.balanceHeader}>Balance: {balance ? `${parseFloat(balance).toFixed(4)} XLM` : '...'}</span>
-            <span style={s.addr}>{publicKey.slice(0, 6)}...{publicKey.slice(-4)}</span>
-            <button style={s.disconnectBtn} onClick={disconnectWallet}>Disconnect</button>
-          </div>
-        ) : (
-          <button style={s.connectBtn} onClick={connectWallet}>Connect Wallet</button>
-        )}
-      </header>
+    <div className="min-h-screen bg-slate-900">
+      <canvas
+        ref={canvasRef}
+        className="fixed top-0 left-0 w-full h-full pointer-events-none"
+        style={{ zIndex: 9999 }}
+      />
 
-      <main style={s.main}>
-        <div style={s.card}>
-          <div style={s.statsRow}>
-            <div style={s.statBox}>
-              <div style={s.statValue}>{raisedXLM.toFixed(2)}</div>
-              <div style={s.statLabel}>Raised (XLM)</div>
-            </div>
-            <div style={s.statBox}>
-              <div style={s.statValue}>{goalXLM.toFixed(0)}</div>
-              <div style={s.statLabel}>Goal (XLM)</div>
-            </div>
-            <div style={s.statBox}>
-              <div style={s.statValue}>{donationCount}</div>
-              <div style={s.statLabel}>Donations</div>
-            </div>
-          </div>
+      <Header onConnect={connectWallet} onDisconnect={disconnectWallet} />
 
-          <div style={s.progressBar}>
-            <div style={s.progressFill} />
-          </div>
-          <div style={s.progressText}>{progressPct.toFixed(1)}% funded</div>
+      <main className="max-w-lg mx-auto mt-12 px-5">
+        <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700">
+          <CampaignCard />
 
-          <p style={s.desc}>
+          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
             Support this crowdfund campaign on Stellar testnet. Connect your wallet and donate XLM.
           </p>
 
-          {publicKey ? (
-            <div>
-              <label style={s.label}>Donation Amount (XLM)</label>
-              <div style={s.quickBtns}>
-                {[10, 50, 100, 500].map((val) => (
-                  <button key={val} style={s.quickBtn} onClick={() => setAmount(val.toString())}>
-                    {val} XLM
-                  </button>
-                ))}
-              </div>
-              <input
-                style={s.input}
-                type="number"
-                placeholder="Enter amount..."
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                min="0"
-                step="0.01"
-              />
-
-              <button
-                style={isSending ? s.sendBtnDisabled : s.sendBtn}
-                onClick={sendTransaction}
-                disabled={isSending}
-              >
-                {isSending ? 'Sending...' : 'Donate XLM'}
-              </button>
-            </div>
-          ) : (
-            <p style={s.prompt}>Connect your wallet to donate.</p>
-          )}
+          <DonateForm onDonate={sendTransaction} />
 
           {status && (
-            <p style={isError ? s.error : s.status}>{status}</p>
+            <p className={`mt-3.5 text-xs text-center ${isError ? 'text-red-400' : 'text-slate-400'}`}>
+              {status}
+            </p>
           )}
 
           {txHash && (
-            <p style={{ ...s.status, color: '#38bdf8' }}>
-              <a href={`https://stellar.expert/explorer/testnet/tx/${txHash}`} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8' }}>
+            <p className="mt-3.5 text-xs text-center text-cyan-400">
+              <a
+                href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-400 hover:underline"
+              >
                 View on Explorer
               </a>
             </p>
           )}
+        </div>
 
-          <div style={s.donorsSection}>
-            <div style={s.donorsTitle}>Recent Donations</div>
-            {recentDonors.length > 0 ? (
-              recentDonors.map((d, i) => (
-                <div key={i} style={s.donorRow}>
-                  <div>
-                    <div style={s.donorAddr}>{d.address.slice(0, 6)}...{d.address.slice(-4)}</div>
-                    <div style={s.donorTime}>{new Date(d.time).toLocaleString()}</div>
-                  </div>
-                  <div style={s.donorAmount}>{(parseFloat(d.amount) / 10_000_000).toFixed(2)} XLM</div>
-                </div>
-              ))
-            ) : (
-              <div style={s.noDonors}>No donations yet. Be the first!</div>
-            )}
-          </div>
+        <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700 mt-5">
+          <RecentDonations />
         </div>
       </main>
+
+      <CreateCampaign />
     </div>
   )
 }
