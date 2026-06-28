@@ -14,11 +14,12 @@ import CampaignCard from './components/CampaignCard'
 import DonateForm from './components/DonateForm'
 import RecentDonations from './components/RecentDonations'
 import CreateCampaign from './components/CreateCampaign'
+import { CONTRACT_ADDRESSES, SOROBAN_RPC_URL, HORIZON_URL, NETWORK_PASSPHRASE } from './config'
 
-const HORIZON_SERVER = new Horizon.Server('https://horizon-testnet.stellar.org')
-const SOROBAN_SERVER = new rpc.Server('https://soroban-testnet.stellar.org')
-const CONTRACT_ID = 'CDVCR252R3SL4DDLTAX6XZ4G7K2EZAN5EURMNFYUNVM6A7ABVP5HRTLD'
-const contract = new Contract(CONTRACT_ID)
+const HORIZON_SERVER = new Horizon.Server(HORIZON_URL)
+const SOROBAN_SERVER = new rpc.Server(SOROBAN_RPC_URL)
+const FACTORY_ID = CONTRACT_ADDRESSES.factory
+const factoryContract = new Contract(FACTORY_ID)
 
 const kit = StellarWalletsKit.init({
   modules: [
@@ -36,8 +37,10 @@ function App() {
   const canvasRef = useRef(null)
   const {
     setPublicKey, setBalance, setWalletName, setStatus, setTxHash,
-    setIsSending, setTotalRaised, setGoal, setRecentDonors,
-    setDonationCount, resetWallet, publicKey,
+    setIsSending, setTotalRaised, setGoal, setDeadline, setRecentDonors,
+    setDonationCount, resetWallet, publicKey, selectedCampaign,
+    setSelectedCampaign, setCampaigns, campaigns, setIsLoadingCampaigns,
+    showCreateForm, setShowCreateForm,
   } = useStore()
 
   const fireConfetti = () => {
@@ -102,8 +105,31 @@ function App() {
     }
   }, [setBalance])
 
-  const invokeRead = useCallback(async (method, ...args) => {
+  const invokeFactoryRead = useCallback(async (method, ...args) => {
     try {
+      const sourceAccount = await HORIZON_SERVER.loadAccount(publicKey || 'GDGGSUZ42XTYN5MLZGLNNUGO446SVL6XVZQQSPTSCEM2PCHCRZCW3X3C')
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: '100',
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(factoryContract.call(method, ...args))
+        .setTimeout(30)
+        .build()
+
+      const result = await SOROBAN_SERVER.simulateTransaction(tx)
+      if (result.error) throw result.error
+      const retval = result.result?.retval
+      if (!retval) return null
+      return scValToNative(retval)
+    } catch (error) {
+      console.error(`Factory read ${method} failed:`, error)
+      return null
+    }
+  }, [publicKey])
+
+  const invokeCampaignRead = useCallback(async (contractId, method, ...args) => {
+    try {
+      const contract = new Contract(contractId)
       const sourceAccount = await HORIZON_SERVER.loadAccount(publicKey || 'GDGGSUZ42XTYN5MLZGLNNUGO446SVL6XVZQQSPTSCEM2PCHCRZCW3X3C')
       const tx = new TransactionBuilder(sourceAccount, {
         fee: '100',
@@ -119,44 +145,87 @@ function App() {
       if (!retval) return null
       return scValToNative(retval)
     } catch (error) {
-      console.error(`Read ${method} failed:`, error)
+      console.error(`Campaign read ${method} failed:`, error)
       return null
     }
   }, [publicKey])
 
-  const fetchContractData = useCallback(async () => {
+  const fetchCampaigns = useCallback(async () => {
+    setIsLoadingCampaigns(true)
     try {
-      const [goalResult, raisedResult] = await Promise.all([
-        invokeRead('get_goal'),
-        invokeRead('get_total_raised'),
-      ])
+      const campaignAddrs = await invokeFactoryRead('get_campaigns')
+      if (!campaignAddrs || !Array.isArray(campaignAddrs)) {
+        setCampaigns([])
+        return
+      }
+
+      const campaignData = await Promise.all(
+        campaignAddrs.map(async (addr) => {
+          try {
+            const info = await invokeCampaignRead(addr, 'get_info')
+            if (!info) return null
+            const [goal, raised, deadline] = info
+            return { address: addr, goal: String(goal), raised: String(raised), deadline }
+          } catch {
+            return null
+          }
+        })
+      )
+
+      const validCampaigns = campaignData.filter(Boolean)
+      setCampaigns(validCampaigns)
+
+      if (selectedCampaign) {
+        const updated = validCampaigns.find((c) => c.address === selectedCampaign.address)
+        if (updated) setSelectedCampaign(updated)
+      }
+    } catch (error) {
+      console.error('Failed to fetch campaigns:', error)
+    } finally {
+      setIsLoadingCampaigns(false)
+    }
+  }, [invokeFactoryRead, invokeCampaignRead, setCampaigns, setIsLoadingCampaigns, selectedCampaign, setSelectedCampaign])
+
+  const fetchContractData = useCallback(async () => {
+    if (selectedCampaign) {
+      const goalResult = await invokeCampaignRead(selectedCampaign.address, 'get_goal')
+      const raisedResult = await invokeCampaignRead(selectedCampaign.address, 'get_total_raised')
       if (goalResult != null) setGoal(String(goalResult))
       if (raisedResult != null) setTotalRaised(String(raisedResult))
-    } catch {
-      console.error('Contract read failed')
     }
-  }, [invokeRead, setGoal, setTotalRaised])
+  }, [selectedCampaign, invokeCampaignRead, setGoal, setTotalRaised])
 
   const fetchRecentDonors = useCallback(async () => {
     try {
-      const stored = localStorage.getItem('crowdfund_donations')
+      const key = selectedCampaign
+        ? `crowdfund_donations_${selectedCampaign.address}`
+        : 'crowdfund_donations'
+      const stored = localStorage.getItem(key)
       if (stored) {
         const donations = JSON.parse(stored)
         setDonationCount(donations.length)
         setRecentDonors(donations.slice(0, 5))
+      } else {
+        setDonationCount(0)
+        setRecentDonors([])
       }
     } catch {}
-  }, [setDonationCount, setRecentDonors])
+  }, [setDonationCount, setRecentDonors, selectedCampaign])
 
   useEffect(() => {
-    fetchContractData()
-    fetchRecentDonors()
+    fetchCampaigns()
     const interval = setInterval(() => {
+      fetchCampaigns()
       fetchContractData()
       fetchRecentDonors()
     }, 10000)
     return () => clearInterval(interval)
-  }, [fetchContractData, fetchRecentDonors])
+  }, [fetchCampaigns, fetchContractData, fetchRecentDonors])
+
+  useEffect(() => {
+    fetchContractData()
+    fetchRecentDonors()
+  }, [selectedCampaign, fetchContractData, fetchRecentDonors])
 
   useEffect(() => {
     const unsub = StellarWalletsKit.on('STATE_UPDATE', (e) => {
@@ -191,6 +260,11 @@ function App() {
   }
 
   const sendTransaction = async () => {
+    if (!selectedCampaign) {
+      setStatus('Please select a campaign first')
+      return
+    }
+
     const amount = useStore.getState().amount
     if (!amount || parseFloat(amount) <= 0) {
       setStatus('Please enter a valid amount')
@@ -204,13 +278,14 @@ function App() {
     try {
       const account = await HORIZON_SERVER.loadAccount(publicKey)
       const amountStroops = Math.floor(parseFloat(amount) * 10_000_000)
+      const campaignContract = new Contract(selectedCampaign.address)
 
       const transaction = new TransactionBuilder(account, {
         fee: await HORIZON_SERVER.fetchBaseFee(),
         networkPassphrase: Networks.TESTNET,
       })
         .addOperation(
-          contract.call(
+          campaignContract.call(
             'donate',
             nativeToScVal(new Address(publicKey), { type: 'address' }),
             nativeToScVal(amountStroops, { type: 'i128' })
@@ -238,7 +313,8 @@ function App() {
       setStatus('Donation successful!')
       fireConfetti()
 
-      const stored = localStorage.getItem('crowdfund_donations')
+      const key = `crowdfund_donations_${selectedCampaign.address}`
+      const stored = localStorage.getItem(key)
       const donations = stored ? JSON.parse(stored) : []
       donations.unshift({
         address: publicKey,
@@ -246,11 +322,12 @@ function App() {
         tx: result.hash,
         time: new Date().toISOString(),
       })
-      localStorage.setItem('crowdfund_donations', JSON.stringify(donations))
+      localStorage.setItem(key, JSON.stringify(donations))
 
       await fetchBalance(publicKey)
       await fetchContractData()
       await fetchRecentDonors()
+      await fetchCampaigns()
       useStore.getState().setAmount('')
     } catch (error) {
       console.error('Transaction failed', error)
@@ -261,6 +338,67 @@ function App() {
         setStatus('Account not found on testnet. Get XLM from friendbot first.')
       } else if (msg.includes('insufficient') || msg.includes('underfunded')) {
         setStatus('Insufficient balance for this donation.')
+      } else {
+        setStatus(`Error: ${msg}`)
+      }
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const createCampaign = async (goal, deadline) => {
+    if (!publicKey) {
+      setStatus('Please connect wallet first')
+      return
+    }
+
+    setIsSending(true)
+    setStatus('Creating campaign...')
+    setTxHash('')
+
+    try {
+      const account = await HORIZON_SERVER.loadAccount(publicKey)
+
+      const transaction = new TransactionBuilder(account, {
+        fee: await HORIZON_SERVER.fetchBaseFee(),
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          factoryContract.call(
+            'create_campaign',
+            nativeToScVal(Math.floor(parseFloat(goal) * 10_000_000), { type: 'i128' }),
+            nativeToScVal(BigInt(deadline), { type: 'u64' })
+          )
+        )
+        .setTimeout(60)
+        .build()
+
+      setStatus('Simulating transaction...')
+      const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
+      if (simResult.error) throw simResult.error
+
+      const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
+
+      setStatus('Waiting for wallet signature...')
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      setStatus('Submitting to network...')
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+      const result = await HORIZON_SERVER.submitTransaction(signedTx)
+
+      setTxHash(result.hash)
+      setStatus('Campaign created successfully!')
+      fireConfetti()
+
+      await fetchCampaigns()
+      setShowCreateForm(false)
+    } catch (error) {
+      console.error('Campaign creation failed', error)
+      const msg = error.message || String(error)
+      if (msg.includes('rejected')) {
+        setStatus('Transaction rejected by user.')
       } else {
         setStatus(`Error: ${msg}`)
       }
@@ -288,42 +426,93 @@ function App() {
 
       <Header onConnect={connectWallet} onDisconnect={disconnectWallet} />
 
-      <main className="max-w-lg mx-auto mt-12 px-5">
-        <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700">
-          <CampaignCard />
-
-          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-            Support this crowdfund campaign on Stellar testnet. Connect your wallet and donate XLM.
-          </p>
-
-          <DonateForm onDonate={sendTransaction} />
-
-          {status && (
-            <p className={`mt-3.5 text-xs text-center ${isError ? 'text-red-400' : 'text-slate-400'}`}>
-              {status}
-            </p>
-          )}
-
-          {txHash && (
-            <p className="mt-3.5 text-xs text-center text-cyan-400">
-              <a
-                href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-cyan-400 hover:underline"
+      <main className="max-w-2xl mx-auto mt-12 px-5">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-white">
+            {selectedCampaign ? 'Campaign Details' : 'Active Campaigns'}
+          </h2>
+          <div className="flex gap-2">
+            {selectedCampaign && (
+              <button
+                onClick={() => {
+                  setSelectedCampaign(null)
+                  setGoal('0')
+                  setTotalRaised('0')
+                  setRecentDonors([])
+                  setDonationCount(0)
+                }}
+                className="text-xs text-slate-300 border border-slate-600 px-3 py-1.5 rounded-md hover:bg-slate-700 transition-colors"
               >
-                View on Explorer
-              </a>
-            </p>
-          )}
+                Back
+              </button>
+            )}
+            <button
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              className="text-xs bg-cyan-400 text-slate-900 px-3 py-1.5 rounded-md font-semibold hover:bg-cyan-300 transition-colors"
+            >
+              {showCreateForm ? 'Cancel' : '+ New Campaign'}
+            </button>
+          </div>
         </div>
 
-        <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700 mt-5">
-          <RecentDonations />
-        </div>
+        {showCreateForm && (
+          <CreateCampaign onSubmit={createCampaign} />
+        )}
+
+        {!showCreateForm && !selectedCampaign && (
+          <CampaignCard
+            campaigns={campaigns}
+            onSelect={setSelectedCampaign}
+          />
+        )}
+
+        {selectedCampaign && (
+          <>
+            <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700">
+              <div className="mb-4">
+                <div className="text-xs text-slate-500 mb-1">Campaign Address</div>
+                <div className="text-xs font-mono text-slate-400 break-all">
+                  {selectedCampaign.address}
+                </div>
+              </div>
+
+              <CampaignCard
+                campaigns={[selectedCampaign]}
+                compact
+              />
+
+              <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                Support this crowdfund campaign on Stellar testnet. Connect your wallet and donate XLM.
+              </p>
+
+              <DonateForm onDonate={sendTransaction} />
+
+              {status && (
+                <p className={`mt-3.5 text-xs text-center ${isError ? 'text-red-400' : 'text-slate-400'}`}>
+                  {status}
+                </p>
+              )}
+
+              {txHash && (
+                <p className="mt-3.5 text-xs text-center text-cyan-400">
+                  <a
+                    href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-cyan-400 hover:underline"
+                  >
+                    View on Explorer
+                  </a>
+                </p>
+              )}
+            </div>
+
+            <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700 mt-5">
+              <RecentDonations />
+            </div>
+          </>
+        )}
       </main>
-
-      <CreateCampaign />
     </div>
   )
 }
