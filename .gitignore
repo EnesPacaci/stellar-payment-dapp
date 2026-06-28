@@ -27,3 +27,5 @@ dist-ssr
 contract/target/
 contract/contracts/*/target/
 contract/test_snapshots/
+
+.vercel

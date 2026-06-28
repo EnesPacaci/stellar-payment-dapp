@@ -1,0 +1,10 @@
+node_modules
+contract/target
+contract/contracts
+contract/Cargo.lock
+contract/Cargo.toml
+.github
+.git
+screenshots
+test_snapshots
+*.wasm

@@ -1,7 +1,15 @@
 #![no_std]
 #[cfg(test)]
 extern crate std;
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, IntoVal, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, IntoVal, String, Vec};
+
+#[derive(Clone)]
+#[contracttype]
+pub struct Milestone {
+    pub amount: i128,
+    pub description: String,
+    pub status: u32,
+}
 
 #[contracttype]
 pub enum DataKey {
@@ -28,8 +36,9 @@ impl Factory {
         env.storage().instance().set(&DataKey::Nonce, &0_u32);
     }
 
-    pub fn create_campaign(env: Env, goal: i128, deadline: u64) -> Address {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+    pub fn create_campaign(env: Env, creator: Address, name: soroban_sdk::String, goal: i128, deadline: u64, milestones: Vec<Vec<soroban_sdk::Val>>) -> Address {
+        creator.require_auth();
+
         let wasm: BytesN<32> = env
             .storage()
             .instance()
@@ -51,10 +60,12 @@ impl Factory {
         let campaign_addr = deployer.deploy_v2(wasm, ());
 
         let mut args: Vec<soroban_sdk::Val> = Vec::new(&env);
-        args.push_back(admin.into_val(&env));
+        args.push_back(creator.into_val(&env));
         args.push_back(env.current_contract_address().into_val(&env));
+        args.push_back(name.into_val(&env));
         args.push_back(goal.into_val(&env));
         args.push_back(deadline.into_val(&env));
+        args.push_back(milestones.into_val(&env));
 
         env.invoke_contract::<soroban_sdk::Val>(
             &campaign_addr,
@@ -100,6 +111,23 @@ mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
 
+    fn default_milestones(env: &Env, amounts: &[i128]) -> Vec<Vec<soroban_sdk::Val>> {
+        let mut milestones = Vec::new(env);
+        for (i, amount) in amounts.iter().enumerate() {
+            let desc = match i {
+                0 => "Phase 1",
+                1 => "Phase 2",
+                _ => "Phase N",
+            };
+            let mut ms = Vec::new(env);
+            ms.push_back((*amount).into_val(env));
+            ms.push_back(String::from_str(env, desc).into_val(env));
+            ms.push_back(0_u32.into_val(env));
+            milestones.push_back(ms);
+        }
+        milestones
+    }
+
     #[test]
     fn test_initialize() {
         let env = Env::default();
@@ -131,7 +159,9 @@ mod tests {
         env.mock_all_auths();
         factory_client.initialize(&admin, &wasm_hash);
 
-        let campaign_addr = factory_client.create_campaign(&1000, &1000000);
+        let creator = Address::generate(&env);
+        let milestones = default_milestones(&env, &[300, 700]);
+        let campaign_addr = factory_client.create_campaign(&creator, &String::from_str(&env, "Test Camp"), &1000, &1000000, &milestones);
         assert_eq!(factory_client.get_campaign_count(), 1);
         assert_eq!(factory_client.get_campaigns().len(), 1);
         assert_eq!(factory_client.get_campaigns().get(0).unwrap(), campaign_addr);
@@ -141,6 +171,7 @@ mod tests {
         assert_eq!(goal, 1000);
         assert_eq!(raised, 0);
         assert_eq!(deadline, 1000000);
+        assert_eq!(campaign_client.get_milestones().len(), 2);
     }
 
     #[test]
@@ -159,8 +190,12 @@ mod tests {
         env.mock_all_auths();
         factory_client.initialize(&admin, &wasm_hash);
 
-        factory_client.create_campaign(&500, &1000000);
-        factory_client.create_campaign(&2000, &2000000);
+        let creator1 = Address::generate(&env);
+        let creator2 = Address::generate(&env);
+        let ms1 = default_milestones(&env, &[500]);
+        let ms2 = default_milestones(&env, &[1000, 1000]);
+        factory_client.create_campaign(&creator1, &String::from_str(&env, "Camp 1"), &500, &1000000, &ms1);
+        factory_client.create_campaign(&creator2, &String::from_str(&env, "Camp 2"), &2000, &2000000, &ms2);
         assert_eq!(factory_client.get_campaign_count(), 2);
     }
 }
