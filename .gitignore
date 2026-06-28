@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust
+contract/target/
+contract/contracts/*/target/
+contract/test_snapshots/
