@@ -165,26 +165,21 @@ function App() {
             const info = await invokeCampaignRead(addr, 'get_info')
             if (!info) return null
             const [goal, raised, deadline] = info
-            return { address: addr, goal: String(goal), raised: String(raised), deadline }
+            return { address: addr, goal: String(goal), raised: String(raised), deadline: Number(deadline) }
           } catch {
             return null
           }
         })
       )
 
-      const validCampaigns = campaignData.filter(Boolean)
+      const validCampaigns = campaignData.filter(Boolean).reverse()
       setCampaigns(validCampaigns)
-
-      if (selectedCampaign) {
-        const updated = validCampaigns.find((c) => c.address === selectedCampaign.address)
-        if (updated) setSelectedCampaign(updated)
-      }
     } catch (error) {
       console.error('Failed to fetch campaigns:', error)
     } finally {
       setIsLoadingCampaigns(false)
     }
-  }, [invokeFactoryRead, invokeCampaignRead, setCampaigns, setIsLoadingCampaigns, selectedCampaign, setSelectedCampaign])
+  }, [invokeFactoryRead, invokeCampaignRead, setCampaigns, setIsLoadingCampaigns])
 
   const fetchContractData = useCallback(async () => {
     if (selectedCampaign) {
@@ -214,18 +209,14 @@ function App() {
 
   useEffect(() => {
     fetchCampaigns()
-    const interval = setInterval(() => {
-      fetchCampaigns()
-      fetchContractData()
-      fetchRecentDonors()
-    }, 10000)
-    return () => clearInterval(interval)
-  }, [fetchCampaigns, fetchContractData, fetchRecentDonors])
+  }, [])
 
   useEffect(() => {
-    fetchContractData()
-    fetchRecentDonors()
-  }, [selectedCampaign, fetchContractData, fetchRecentDonors])
+    if (selectedCampaign) {
+      fetchContractData()
+      fetchRecentDonors()
+    }
+  }, [selectedCampaign])
 
   useEffect(() => {
     const unsub = StellarWalletsKit.on('STATE_UPDATE', (e) => {
@@ -325,9 +316,20 @@ function App() {
       localStorage.setItem(key, JSON.stringify(donations))
 
       await fetchBalance(publicKey)
-      await fetchContractData()
       await fetchRecentDonors()
-      await fetchCampaigns()
+      if (selectedCampaign) {
+        const newRaised = String(BigInt(selectedCampaign.raised || '0') + BigInt(amountStroops))
+        setSelectedCampaign({ ...selectedCampaign, raised: newRaised })
+      }
+      const donatedCampaignAddr = selectedCampaign?.address
+      setTimeout(async () => {
+        await fetchCampaigns()
+        const current = useStore.getState().selectedCampaign
+        if (current && donatedCampaignAddr) {
+          const updated = useStore.getState().campaigns.find(c => c.address === donatedCampaignAddr)
+          if (updated) setSelectedCampaign(updated)
+        }
+      }, 3000)
       useStore.getState().setAmount('')
     } catch (error) {
       console.error('Transaction failed', error)
@@ -346,7 +348,7 @@ function App() {
     }
   }
 
-  const createCampaign = async (goal, deadline) => {
+  const createCampaign = async (name, goal, deadline) => {
     if (!publicKey) {
       setStatus('Please connect wallet first')
       return
@@ -358,6 +360,8 @@ function App() {
 
     try {
       const account = await HORIZON_SERVER.loadAccount(publicKey)
+
+      const prevAddrs = useStore.getState().campaigns.map(c => c.address)
 
       const transaction = new TransactionBuilder(account, {
         fee: await HORIZON_SERVER.fetchBaseFee(),
@@ -392,7 +396,14 @@ function App() {
       setStatus('Campaign created successfully!')
       fireConfetti()
 
+      const storedNames = JSON.parse(localStorage.getItem('campaign_names') || '{}')
       await fetchCampaigns()
+      const newAddrs = useStore.getState().campaigns.map(c => c.address)
+      const newAddr = newAddrs.find(a => !prevAddrs.includes(a))
+      if (newAddr) {
+        storedNames[newAddr] = name
+      }
+      localStorage.setItem('campaign_names', JSON.stringify(storedNames))
       setShowCreateForm(false)
     } catch (error) {
       console.error('Campaign creation failed', error)

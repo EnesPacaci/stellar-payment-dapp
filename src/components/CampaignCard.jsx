@@ -1,14 +1,30 @@
 import useStore from '../store'
 
+function getCampaignName(address) {
+  try {
+    const names = JSON.parse(localStorage.getItem('campaign_names') || '{}')
+    return names[address] || null
+  } catch {
+    return null
+  }
+}
+
 export default function CampaignCard({ campaigns = [], onSelect, compact = false }) {
   if (compact && campaigns.length === 1) {
     const c = campaigns[0]
     const goalXLM = parseFloat(c.goal) / 10_000_000
     const raisedXLM = parseFloat(c.raised) / 10_000_000
     const progressPct = goalXLM > 0 ? Math.min((raisedXLM / goalXLM) * 100, 100) : 0
+    const deadlineDate = c.deadline ? new Date(c.deadline * 1000) : null
+    const isExpired = deadlineDate && deadlineDate < new Date()
+    const daysLeft = deadlineDate ? Math.max(0, Math.ceil((deadlineDate - new Date()) / 86400000)) : null
+    const campaignName = getCampaignName(c.address)
 
     return (
       <div>
+        {campaignName && (
+          <div className="text-lg font-bold text-white mb-4">{campaignName}</div>
+        )}
         <div className="flex justify-between mb-6">
           <div className="text-center flex-1">
             <div className="text-2xl font-bold text-cyan-400 font-mono">
@@ -39,9 +55,14 @@ export default function CampaignCard({ campaigns = [], onSelect, compact = false
             }}
           />
         </div>
-        <div className="text-xs text-right text-slate-400 mb-6">
+        <div className="text-xs text-right text-slate-400 mb-2">
           {progressPct.toFixed(1)}% funded
         </div>
+        {deadlineDate && (
+          <div className={`text-xs text-center ${isExpired ? 'text-red-400' : 'text-slate-500'}`}>
+            {isExpired ? 'Campaign ended' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining`}
+          </div>
+        )}
       </div>
     )
   }
@@ -61,6 +82,7 @@ export default function CampaignCard({ campaigns = [], onSelect, compact = false
         const goalXLM = parseFloat(c.goal) / 10_000_000
         const raisedXLM = parseFloat(c.raised) / 10_000_000
         const progressPct = goalXLM > 0 ? Math.min((raisedXLM / goalXLM) * 100, 100) : 0
+        const campaignName = getCampaignName(c.address)
 
         return (
           <div
@@ -69,8 +91,8 @@ export default function CampaignCard({ campaigns = [], onSelect, compact = false
             className="bg-slate-800 rounded-xl p-5 shadow-lg border border-slate-700 cursor-pointer hover:border-cyan-400/50 transition-colors"
           >
             <div className="flex justify-between items-start mb-3">
-              <div className="text-xs font-mono text-slate-500 truncate flex-1 mr-3">
-                {c.address.slice(0, 8)}...{c.address.slice(-6)}
+              <div className="text-sm font-semibold text-white truncate flex-1 mr-3">
+                {campaignName || `${c.address.slice(0, 8)}...${c.address.slice(-6)}`}
               </div>
               <div className="text-xs font-semibold text-cyan-400">
                 {progressPct.toFixed(1)}%
