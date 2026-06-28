@@ -163,10 +163,13 @@ function App() {
       if (e.payload.address) {
         setPublicKey(e.payload.address)
         fetchBalance(e.payload.address)
+        if (StellarWalletsKit.selectedModule) {
+          setWalletName(StellarWalletsKit.selectedModule.productName || 'Wallet')
+        }
       }
     })
     return () => unsub()
-  }, [setPublicKey, fetchBalance])
+  }, [setPublicKey, setWalletName, fetchBalance])
 
   const connectWallet = async () => {
     try {
