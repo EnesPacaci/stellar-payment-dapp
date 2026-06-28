@@ -134,10 +134,23 @@ cargo test
 
 ## Screenshots
 
-See the [`screenshots/level3/`](screenshots/level3/) directory for:
-- Mobile responsive UI
-- CI/CD pipeline (GitHub Actions + Vercel)
-- Test output (9 passing tests)
+### Mobile Responsive UI - Campaign List
+![Campaign List](screenshots/level3/main_page_mobile_responsive_ui.png)
+
+### Campaign Detail with Milestones
+![Campaign Detail](screenshots/level3/campaign_details_mobile_responsive_ui.png)
+
+### Create Campaign Form
+![Create Campaign](screenshots/level3/create_campaign_mobile_responsive_ui.png)
+
+### CI/CD Pipeline - GitHub Actions
+![CI Pipeline](screenshots/level3/ci-pipeline.png)
+
+### CD Pipeline - Vercel Deployment
+![CD Pipeline](screenshots/level3/cd-pipeline.png)
+
+### Test Output - 9 Tests Passing
+![Test Output](screenshots/level3/test_output.png)
 
 ## Demo Video
 
