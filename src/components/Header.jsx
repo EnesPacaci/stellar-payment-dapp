@@ -1,7 +1,7 @@
 import useStore from '../store'
 
 export default function Header({ onConnect, onDisconnect }) {
-  const { publicKey, balance, walletName } = useStore()
+  const { publicKey, balance, walletName, isSending } = useStore()
 
   return (
     <header className="bg-slate-800 border-b border-slate-700 px-6 py-3.5 flex items-center justify-between">
@@ -21,7 +21,10 @@ export default function Header({ onConnect, onDisconnect }) {
           )}
           <button
             onClick={onDisconnect}
-            className="text-xs text-slate-300 border border-slate-600 px-4 py-1.5 rounded-md hover:bg-slate-700 transition-colors"
+            disabled={isSending}
+            className={`text-xs text-slate-300 border border-slate-600 px-4 py-1.5 rounded-md transition-colors ${
+              isSending ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-700'
+            }`}
           >
             Disconnect
           </button>
