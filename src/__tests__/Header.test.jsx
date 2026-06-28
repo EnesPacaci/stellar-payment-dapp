@@ -19,7 +19,7 @@ describe('Header', () => {
     })
     render(<Header onConnect={() => {}} onDisconnect={() => {}} />)
     expect(screen.getByText('Disconnect')).toBeInTheDocument()
-    expect(screen.getByText(/Balance:/)).toBeInTheDocument()
+    expect(screen.getByText(/XLM/)).toBeInTheDocument()
     expect(screen.getByText('Freighter')).toBeInTheDocument()
   })
 })
