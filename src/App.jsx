@@ -734,12 +734,12 @@ function App() {
 
       <Header onConnect={connectWallet} onDisconnect={disconnectWallet} />
 
-      <main className="max-w-2xl mx-auto mt-12 px-5">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold text-white">
+      <main className="max-w-2xl mx-auto mt-8 sm:mt-12 px-4 sm:px-5">
+        <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
+          <h2 className="text-lg sm:text-xl font-bold text-white">
             {selectedCampaign ? 'Campaign Details' : 'Active Campaigns'}
           </h2>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {selectedCampaign && !isSending && (
               <button
                 onClick={() => {
@@ -783,7 +783,13 @@ function App() {
             )}
             <button
               onClick={() => {
+                setSelectedCampaign(null)
                 setShowCreateForm(!showCreateForm)
+                setGoal('0')
+                setTotalRaised('0')
+                setRecentDonors([])
+                setDonationCount(0)
+                setTxHash('')
                 setStatus('')
               }}
               disabled={isSending}
