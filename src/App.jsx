@@ -325,16 +325,20 @@ function App() {
 
   useEffect(() => {
     if (!selectedCampaign) return
+    const addr = selectedCampaign.address
+    let cancelled = false
     let timeout
     const poll = async () => {
-      if (!isSending) {
-        const fresh = await fetchSingleCampaign(selectedCampaign.address)
-        if (fresh && fresh.name !== 'Loading...') setSelectedCampaign(fresh)
+      if (!isSending && !cancelled) {
+        const fresh = await fetchSingleCampaign(addr)
+        if (!cancelled && fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === addr) {
+          setSelectedCampaign(fresh)
+        }
       }
-      timeout = setTimeout(poll, 10000)
+      if (!cancelled) timeout = setTimeout(poll, 10000)
     }
     timeout = setTimeout(poll, 10000)
-    return () => clearTimeout(timeout)
+    return () => { cancelled = true; clearTimeout(timeout) }
   }, [selectedCampaign, isSending, fetchSingleCampaign])
 
   useEffect(() => {
@@ -607,8 +611,10 @@ function App() {
         setCampaigns(current.map(c => c.address === campaignAddr ? updated : c))
       }
       setTimeout(async () => {
+        const still = useStore.getState().selectedCampaign
+        if (!still || still.address !== campaignAddr) return
         const fresh = await fetchSingleCampaign(campaignAddr)
-        if (fresh && fresh.name !== 'Loading...') setSelectedCampaign(fresh)
+        if (fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === campaignAddr) setSelectedCampaign(fresh)
       }, 3000)
     } catch (error) {
       console.error('Submit milestone failed', error)
@@ -690,8 +696,10 @@ function App() {
         setCampaigns(current.map(c => c.address === campaignAddr ? updated : c))
       }
       setTimeout(async () => {
+        const still = useStore.getState().selectedCampaign
+        if (!still || still.address !== campaignAddr) return
         const fresh = await fetchSingleCampaign(campaignAddr)
-        if (fresh && fresh.name !== 'Loading...') setSelectedCampaign(fresh)
+        if (fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === campaignAddr) setSelectedCampaign(fresh)
       }, 3000)
     } catch (error) {
       console.error('Approve milestone failed', error)
@@ -751,9 +759,14 @@ function App() {
             {selectedCampaign && !isSending && (
               <button
                 onClick={() => {
+                  const addr = selectedCampaign.address
                   setStatus('Refreshing...')
                   setTimeout(async () => {
-                    const fresh = await fetchSingleCampaign(selectedCampaign.address)
+                    const current = useStore.getState().selectedCampaign
+                    if (!current || current.address !== addr) return
+                    const fresh = await fetchSingleCampaign(addr)
+                    const still = useStore.getState().selectedCampaign
+                    if (!still || still.address !== addr) return
                     const hasData = fresh && fresh.milestones.length > 0 && fresh.totalReleased !== '0'
                     if (fresh && (fresh.name !== 'Loading...' || hasData)) {
                       setSelectedCampaign(fresh)
