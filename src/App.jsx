@@ -460,10 +460,30 @@ function App() {
         )}
 
         {!showCreateForm && !selectedCampaign && (
-          <CampaignCard
-            campaigns={campaigns}
-            onSelect={setSelectedCampaign}
-          />
+          <>
+            {useStore.getState().isLoadingCampaigns ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="bg-slate-800 rounded-xl p-5 shadow-lg border border-slate-700 animate-pulse">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="h-3 bg-slate-700 rounded w-32"></div>
+                      <div className="h-3 bg-slate-700 rounded w-10"></div>
+                    </div>
+                    <div className="flex justify-between mb-3">
+                      <div className="h-6 bg-slate-700 rounded w-20"></div>
+                      <div className="h-6 bg-slate-700 rounded w-20"></div>
+                    </div>
+                    <div className="w-full h-2 bg-slate-700 rounded-full"></div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <CampaignCard
+                campaigns={campaigns}
+                onSelect={setSelectedCampaign}
+              />
+            )}
+          </>
         )}
 
         {selectedCampaign && (
