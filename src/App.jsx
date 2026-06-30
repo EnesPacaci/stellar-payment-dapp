@@ -359,20 +359,79 @@ function App() {
   }, [selectedCampaign, invokeCampaignRead, setGoal, setTotalRaised])
 
   const fetchRecentDonors = useCallback(async () => {
+    if (!selectedCampaign) {
+      setDonationCount(0)
+      setRecentDonors([])
+      return
+    }
     try {
-      const key = selectedCampaign
-        ? `crowdfund_donations_${selectedCampaign.address}`
-        : 'crowdfund_donations'
-      const stored = localStorage.getItem(key)
-      if (stored) {
-        const donations = JSON.parse(stored)
+      const latestLedger = await SOROBAN_SERVER.getLatestLedger()
+      const startLedger = Math.max(latestLedger.sequence - 5000, 1)
+      const result = await SOROBAN_SERVER.getEvents({
+        startLedger,
+        filters: [{
+          type: 'contract',
+          contractIds: [selectedCampaign.address]
+        }],
+        pagination: { limit: 100 }
+      })
+      if (result.events && result.events.length > 0) {
+        const donateEvents = result.events.filter(e => {
+          try {
+            const sym = scValToNative(e.topic[0])
+            return sym === 'donate'
+          } catch { return false }
+        })
+        const donations = donateEvents
+          .filter(e => e.inSuccessfulContractCall !== false)
+          .map(e => {
+            let data
+            try {
+              data = scValToNative(e.value)
+            } catch (err1) {
+              try {
+                data = scValToNative(xdr.ScVal.fromXDR(e.value, 'base64'))
+              } catch { return null }
+            }
+            if (!data || !Array.isArray(data)) return null
+            return {
+              address: data[0]?.toString() || '',
+              amount: String(data[1] || '0'),
+              tx: e.txHash,
+              time: e.ledgerClosedAt,
+              ledger: e.ledger,
+            }
+          })
+          .filter(Boolean)
+          .reverse()
         setDonationCount(donations.length)
-        setRecentDonors(donations.slice(0, 5))
+        setRecentDonors(donations.slice(0, 10))
       } else {
-        setDonationCount(0)
-        setRecentDonors([])
+        const key = `crowdfund_donations_${selectedCampaign.address}`
+        const stored = localStorage.getItem(key)
+        if (stored) {
+          const donations = JSON.parse(stored)
+          setDonationCount(donations.length)
+          setRecentDonors(donations.slice(0, 10))
+        } else {
+          setDonationCount(0)
+          setRecentDonors([])
+        }
       }
-    } catch {}
+    } catch {
+      try {
+        const key = `crowdfund_donations_${selectedCampaign.address}`
+        const stored = localStorage.getItem(key)
+        if (stored) {
+          const donations = JSON.parse(stored)
+          setDonationCount(donations.length)
+          setRecentDonors(donations.slice(0, 10))
+        } else {
+          setDonationCount(0)
+          setRecentDonors([])
+        }
+      } catch {}
+    }
   }, [setDonationCount, setRecentDonors, selectedCampaign])
 
   const fetchNftTokens = useCallback(async () => {
@@ -454,12 +513,27 @@ function App() {
         if (!cancelled && fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === addr) {
           setSelectedCampaign(fresh)
         }
+        await fetchRecentDonors()
       }
       if (!cancelled) timeout = setTimeout(poll, 10000)
     }
     timeout = setTimeout(poll, 10000)
     return () => { cancelled = true; clearTimeout(timeout) }
   }, [selectedCampaign, isSending, fetchSingleCampaign])
+
+  useEffect(() => {
+    if (!selectedCampaign) return
+    let cancelled = false
+    let timeout
+    const poll = async () => {
+      if (!cancelled) {
+        await fetchRecentDonors()
+      }
+      if (!cancelled) timeout = setTimeout(poll, 10000)
+    }
+    timeout = setTimeout(poll, 10000)
+    return () => { cancelled = true; clearTimeout(timeout) }
+  }, [selectedCampaign, fetchRecentDonors])
 
   useEffect(() => {
     const unsub = StellarWalletsKit.on('STATE_UPDATE', (e) => {
