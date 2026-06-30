@@ -1395,6 +1395,34 @@ function App() {
             </div>
           </>
         )}
+
+        {!selectedCampaign && !showCreateForm && (
+          <div className="bg-slate-800/50 rounded-xl p-6 mt-6 border border-slate-700/50">
+            <div className="text-sm font-semibold text-slate-300 mb-3">How it Works</div>
+            <div className="space-y-2 text-xs text-slate-400">
+              <div className="flex gap-2">
+                <span className="text-cyan-400 font-bold shrink-0">1.</span>
+                <span>Connect your Stellar wallet and browse active campaigns</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-cyan-400 font-bold shrink-0">2.</span>
+                <span>Donate XLM to support a campaign. Your donation = your voting power</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-cyan-400 font-bold shrink-0">3.</span>
+                <span>Vote to approve or reject each milestone. Quorum requires 51% participation</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-cyan-400 font-bold shrink-0">4.</span>
+                <span>When approved (66% supermajority), funds are released to the campaign creator</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-cyan-400 font-bold shrink-0">5.</span>
+                <span>Earn soulbound Proof-of-Impact NFTs for participating in approved milestones</span>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       <footer className="max-w-2xl mx-auto px-4 sm:px-5 py-8 mt-12 border-t border-slate-800">
