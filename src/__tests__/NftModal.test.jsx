@@ -13,15 +13,15 @@ describe('NftModal', () => {
 
   it('renders token list when tokens exist', () => {
     const tokens = [
-      { tokenId: 1, campaign: 'CBTEST123456789ABC', milestoneId: 0, amount: '500000000', timestamp: 1700000000 },
-      { tokenId: 2, campaign: 'CBTEST987654321DEF', milestoneId: 1, amount: '300000000', timestamp: 1700100000 },
+      { tokenId: 1, campaign: 'CBTEST123456789ABC', milestoneId: 0, milestoneName: 'm1', amount: '500000000', timestamp: 1700000000 },
+      { tokenId: 2, campaign: 'CBTEST987654321DEF', milestoneId: 1, milestoneName: 'm2', amount: '300000000', timestamp: 1700100000 },
     ]
     useStore.setState({ publicKey: 'GDGGSUZ42XTYN5MLZGLNNUGO446SVL6XVZQQSPTSCEM2PCHCRZCW3X3C' })
     render(<NftModal tokens={tokens} onClose={() => {}} />)
     expect(screen.getByText('NFT #1')).toBeInTheDocument()
     expect(screen.getByText('NFT #2')).toBeInTheDocument()
-    expect(screen.getByText('Milestone: 0')).toBeInTheDocument()
-    expect(screen.getByText('Milestone: 1')).toBeInTheDocument()
+    expect(screen.getByText('Milestone: m1')).toBeInTheDocument()
+    expect(screen.getByText('Milestone: m2')).toBeInTheDocument()
   })
 
   it('calls onClose when close button is clicked', () => {

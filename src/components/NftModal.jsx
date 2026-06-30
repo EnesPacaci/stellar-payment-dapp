@@ -30,7 +30,7 @@ export default function NftModal({ tokens, onClose }) {
                 <div className="text-[10px] text-slate-400 mb-0.5 font-mono break-all">
                   Campaign: {token.campaign ? `${token.campaign.slice(0, 6)}...${token.campaign.slice(-4)}` : 'Unknown'}
                 </div>
-                <div className="text-[10px] text-slate-400 mb-0.5">Milestone: {token.milestoneId}</div>
+                <div className="text-[10px] text-slate-400 mb-0.5">Milestone: {token.milestoneName || `#${token.milestoneId}`}</div>
                 <div className="text-[10px] text-slate-400 mb-0.5">Amount: {token.amount ? `${(Number(token.amount) / 10_000_000).toFixed(0)} XLM` : '0 XLM'}</div>
                 <div className="text-[10px] text-slate-500">
                   {token.timestamp ? new Date(token.timestamp * 1000).toLocaleDateString() : ''}

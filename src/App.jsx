@@ -199,50 +199,48 @@ function App() {
   }, [publicKey])
 
   const fetchVoteStatus = useCallback(async (addr) => {
-    if (!addr) return { milestones: [], donorTotal: '0', totalVoterWeight: '0' }
+    if (!addr) return { milestones: [], donorTotal: '0', totalVoterWeight: '0', totalDonorCount: '0' }
     try {
-      const milestones = []
       const info = await invokeCampaignRead(addr, 'get_milestones')
       const count = Array.isArray(info) ? info.length : 0
+
+      const perMilestonePromises = []
       for (let i = 0; i < count; i++) {
-        const status = await invokeCampaignRead(addr, 'get_vote_status', nativeToScVal(i, { type: 'u32' }))
-        milestones.push({
-          approvals: status ? String(status[0] || '0') : '0',
-          rejections: status ? String(status[1] || '0') : '0',
-          deadline: status ? Number(status[2] || 0) : 0,
-        })
+        perMilestonePromises.push(
+          Promise.all([
+            invokeCampaignRead(addr, 'get_vote_status', nativeToScVal(i, { type: 'u32' })),
+            invokeCampaignRead(addr, 'get_voted_donor_count', nativeToScVal(i, { type: 'u32' })),
+            publicKey
+              ? invokeCampaignRead(addr, 'get_has_voted', nativeToScVal(new Address(publicKey), { type: 'address' }), nativeToScVal(i, { type: 'u32' }))
+              : Promise.resolve(false),
+            publicKey
+              ? invokeCampaignRead(addr, 'get_refund_claimed', nativeToScVal(new Address(publicKey), { type: 'address' }), nativeToScVal(i, { type: 'u32' }))
+              : Promise.resolve(false),
+          ])
+        )
       }
-      const donorTotal = publicKey
-        ? (await invokeCampaignRead(addr, 'get_donor_total', nativeToScVal(new Address(publicKey), { type: 'address' }))) || '0'
-        : '0'
-      const totalVoterWeight = (await invokeCampaignRead(addr, 'get_total_voter_weight')) || '0'
-      const hasVoted = []
-      for (let i = 0; i < count; i++) {
-        if (publicKey) {
-          const voted = await invokeCampaignRead(addr, 'get_has_voted',
-            nativeToScVal(new Address(publicKey), { type: 'address' }),
-            nativeToScVal(i, { type: 'u32' })
-          )
-          hasVoted[i] = !!voted
-        } else {
-          hasVoted[i] = false
-        }
-      }
-      const refundClaimed = []
-      for (let i = 0; i < count; i++) {
-        if (publicKey) {
-          const claimed = await invokeCampaignRead(addr, 'get_refund_claimed',
-            nativeToScVal(new Address(publicKey), { type: 'address' }),
-            nativeToScVal(i, { type: 'u32' })
-          )
-          refundClaimed[i] = !!claimed
-        } else {
-          refundClaimed[i] = false
-        }
-      }
-      return { milestones, donorTotal: String(donorTotal), totalVoterWeight: String(totalVoterWeight), hasVoted, refundClaimed }
+
+      const [donorTotal, totalVoterWeight, totalDonorCount, ...perMilestoneResults] = await Promise.all([
+        publicKey
+          ? invokeCampaignRead(addr, 'get_donor_total', nativeToScVal(new Address(publicKey), { type: 'address' })) || '0'
+          : Promise.resolve('0'),
+        invokeCampaignRead(addr, 'get_total_voter_weight') || '0',
+        invokeCampaignRead(addr, 'get_total_donor_count') || '0',
+        ...perMilestonePromises,
+      ])
+
+      const milestones = perMilestoneResults.map(([status, votedCount, hasVoted, refundClaimed]) => ({
+        approvals: status ? String(status[0] || '0') : '0',
+        rejections: status ? String(status[1] || '0') : '0',
+        deadline: status ? Number(status[2] || 0) : 0,
+        votedCount: Number(votedCount || 0),
+        hasVoted: !!hasVoted,
+        refundClaimed: !!refundClaimed,
+      }))
+
+      return { milestones, donorTotal: String(donorTotal), totalVoterWeight: String(totalVoterWeight), totalDonorCount: String(totalDonorCount) }
     } catch {
-      return { milestones: [], donorTotal: '0', totalVoterWeight: '0', hasVoted: [], refundClaimed: [] }
+      return { milestones: [], donorTotal: '0', totalVoterWeight: '0', totalDonorCount: '0' }
     }
   }, [invokeCampaignRead, publicKey])
 
@@ -269,6 +267,9 @@ function App() {
               approvals: vs?.approvals || '0',
               rejections: vs?.rejections || '0',
               voteDeadline: vs?.deadline || 0,
+              votedCount: vs?.votedCount || 0,
+              hasVoted: vs?.hasVoted || false,
+              refundClaimed: vs?.refundClaimed || false,
             }
           })
         : []
@@ -282,8 +283,7 @@ function App() {
         totalReleased: String(totalReleased || '0'),
         donorTotal: voteData?.donorTotal || '0',
         totalVoterWeight: voteData?.totalVoterWeight || '0',
-        hasVoted: voteData?.hasVoted || [],
-        refundClaimed: voteData?.refundClaimed || [],
+        totalDonorCount: voteData?.totalDonorCount || '0',
         admin: admin || '',
       }
     } catch {
@@ -398,10 +398,17 @@ function App() {
         try {
           const meta = await invokeCampaignRead(CONTRACT_ADDRESSES.rewardNft, 'get_token_metadata', nativeToScVal(tid, { type: 'u32' }))
           if (!meta) return null
+          let milestoneName = ''
+          try {
+            const milestones = await invokeCampaignRead(meta.campaign, 'get_milestones')
+            const ms = milestones?.[Number(meta.milestone_id || 0)]
+            if (ms?.description) milestoneName = ms.description
+          } catch {}
           return {
             tokenId: tid,
             campaign: meta.campaign || '',
             milestoneId: Number(meta.milestone_id || 0),
+            milestoneName,
             amount: String(meta.amount || '0'),
             timestamp: Number(meta.timestamp || 0),
           }
@@ -743,7 +750,7 @@ function App() {
   const voteOnMilestone = async (campaignAddr, index, approve) => {
     if (!publicKey) return
     const campaign = useStore.getState().campaigns.find(c => c.address === campaignAddr) || selectedCampaign
-    if (campaign && campaign.hasVoted?.[index]) {
+    if (campaign && campaign.milestones?.[index]?.hasVoted) {
       setStatus('You have already voted on this milestone.')
       return
     }
@@ -819,6 +826,46 @@ function App() {
     setStatus('Checking votes and releasing milestone...')
     setTxHash('')
     try {
+      // Önce campaign state'ini çekip şartları kontrol et
+      const [info, voteStatus] = await Promise.all([
+        invokeCampaignRead(campaignAddr, 'get_info'),
+        invokeCampaignRead(campaignAddr, 'get_vote_status', nativeToScVal(index, { type: 'u32' }))
+      ])
+      if (!info) throw new Error('Campaign not found')
+      
+      const goal = Number(info[0] || 0)
+      const raised = Number(info[1] || 0)
+      const totalReleased = (await invokeCampaignRead(campaignAddr, 'get_total_released')) || '0'
+      
+      const approvals = voteStatus ? Number(voteStatus[0] || 0) : 0
+      const rejections = voteStatus ? Number(voteStatus[1] || 0) : 0
+      const totalVoted = approvals + rejections
+      
+      const milestones = await invokeCampaignRead(campaignAddr, 'get_milestones')
+      const ms = milestones?.[index]
+      const msAmount = ms ? Number(ms.amount || 0) : 0
+      
+      // Şart kontrolü — bizim hata mesajlarımız
+      const available = raised - Number(totalReleased)
+      if (available < msAmount) {
+        throw new Error('Not enough funds available for this milestone. Need ' + (msAmount / 10_000_000).toFixed(0) + ' XLM, but only ' + (available / 10_000_000).toFixed(1) + ' XLM available after previous releases.')
+      }
+      if (totalVoted === 0) {
+        throw new Error('No votes cast yet. Cannot release.')
+      }
+      const supermajorityPct = totalVoted > 0 ? (approvals / totalVoted) * 100 : 0
+      if (supermajorityPct < 66) {
+        throw new Error('Supermajority not reached. Need 66% approval, have ' + supermajorityPct.toFixed(0) + '%.')
+      }
+      const donorCount = Number(await invokeCampaignRead(campaignAddr, 'get_total_donor_count') || 0)
+      const votedCount = Number(await invokeCampaignRead(campaignAddr, 'get_voted_donor_count', nativeToScVal(index, { type: 'u32' })) || 0)
+      if (donorCount < 2) {
+        throw new Error('Quorum requires at least 2 donors.')
+      }
+      if (votedCount * 100 <= donorCount * 50) {
+        throw new Error('Quorum not met. Need >50% of donors to vote.')
+      }
+
       const account = await HORIZON_SERVER.loadAccount(publicKey)
       const campaignContract = new Contract(campaignAddr)
       const transaction = new TransactionBuilder(account, {
@@ -868,7 +915,7 @@ function App() {
   const claimRefund = async (campaignAddr, index) => {
     if (!publicKey) return
     const campaign = useStore.getState().campaigns.find(c => c.address === campaignAddr) || selectedCampaign
-    if (campaign && campaign.refundClaimed?.[index]) {
+    if (campaign && campaign.milestones?.[index]?.refundClaimed) {
       setStatus('You have already claimed your refund for this milestone.')
       return
     }
@@ -918,6 +965,51 @@ function App() {
     } catch (error) {
       console.error('Claim refund failed', error)
       setStatus(parseContractError(error, 'refund'))
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const initNft = async () => {
+    if (!publicKey) return
+    setIsSending(true)
+    setStatus('Initializing NFT contract with your wallet as admin...')
+    setTxHash('')
+    try {
+      const account = await HORIZON_SERVER.loadAccount(publicKey)
+      const nftContract = new Contract(CONTRACT_ADDRESSES.rewardNft)
+
+      const tx = new TransactionBuilder(account, {
+        fee: await HORIZON_SERVER.fetchBaseFee(),
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          nftContract.call(
+            'init',
+            nativeToScVal(new Address(publicKey), { type: 'address' })
+          )
+        )
+        .setTimeout(60)
+        .build()
+
+      setStatus('Simulating transaction...')
+      const simResult = await SOROBAN_SERVER.simulateTransaction(tx)
+      if (simResult.error) throw simResult.error
+      const assembledTx = rpc.assembleTransaction(tx, simResult).build()
+
+      setStatus('Waiting for wallet signature...')
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      setStatus('Submitting to network...')
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+      const result = await HORIZON_SERVER.submitTransaction(signedTx)
+      setStatus('NFT contract initialized! You are now the admin.')
+      setTxHash(result.hash)
+    } catch (error) {
+      console.error('Init NFT failed', error)
+      setStatus(parseContractError(error, 'init'))
     } finally {
       setIsSending(false)
     }
@@ -1142,10 +1234,17 @@ function App() {
                   return (c.name || '').toLowerCase().includes(q) ||
                          (c.address || '').toLowerCase().includes(q)
                 })}
-                onSelect={(c) => {
+                onSelect={async (c) => {
                   if (c.name === 'Loading...') return
                   setSelectedCampaign(c)
                   setTxHash('')
+                  const t0 = performance.now()
+                  const fresh = await fetchSingleCampaign(c.address)
+                  const t1 = performance.now()
+                  console.log(`[Campaign Load] ${(t1 - t0).toFixed(0)}ms — milestones: ${fresh?.milestones?.length || 0}`)
+                  if (fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === c.address) {
+                    setSelectedCampaign(fresh)
+                  }
                 }}
               />
             )}
@@ -1200,6 +1299,18 @@ function App() {
                 </div>
               )}
 
+              {publicKey && selectedCampaign.admin === publicKey && (
+                <div className="mb-4">
+                  <button
+                    onClick={initNft}
+                    disabled={isSending}
+                    className="text-xs px-3 py-1.5 rounded bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-50"
+                  >
+                    Initialize NFT Contract (Required before minting)
+                  </button>
+                </div>
+              )}
+
               <CampaignCard
                 campaigns={[selectedCampaign]}
                 compact
@@ -1238,13 +1349,36 @@ function App() {
                       const rejections = Number(ms.rejections || '0')
                       const totalVoted = approvals + rejections
                       const totalVoterWeight = Number(selectedCampaign.totalVoterWeight || '0')
-                      const quorumPct = totalVoterWeight > 0 ? (totalVoted / totalVoterWeight) * 100 : 0
+                      const totalDonorCount = Number(selectedCampaign.totalDonorCount || '0')
+                      const votedCount = ms.votedCount || 0
+                      const quorumPct = totalDonorCount > 0 ? (votedCount / totalDonorCount) * 100 : 0
                       const supermajorityPct = totalVoted > 0 ? (approvals / totalVoted) * 100 : 0
                       const donorWeight = Number(selectedCampaign.donorTotal || '0')
-                      const hasVoted = selectedCampaign.hasVoted?.[i]
-                      const refundClaimed = selectedCampaign.refundClaimed?.[i]
+                      const hasVoted = ms.hasVoted
+                      const refundClaimed = ms.refundClaimed
                       const deadlineDate = ms.voteDeadline ? new Date(ms.voteDeadline * 1000) : null
                       const timeLeft = deadlineDate ? Math.max(0, Math.ceil((deadlineDate - new Date()) / 1000)) : 0
+
+                      const voteDataLoading = st === 1 && !ms.voteDeadline
+
+                      if (voteDataLoading) {
+                        return (
+                          <div key={i} className="bg-slate-900 rounded-lg p-3 border border-slate-700 animate-pulse">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex-1">
+                                <div className="text-xs font-medium text-white">{ms.description}</div>
+                                <div className="text-[11px] text-slate-500 font-mono">{msXLM} XLM</div>
+                              </div>
+                              <div className="h-3 w-16 bg-slate-700 rounded" />
+                            </div>
+                            <div className="space-y-1.5">
+                              <div className="h-2 bg-slate-700 rounded w-full" />
+                              <div className="h-1.5 bg-slate-700 rounded-full w-full" />
+                              <div className="h-2 bg-slate-700 rounded w-2/3" />
+                            </div>
+                          </div>
+                        )
+                      }
 
                       let statusColor = 'text-slate-500'
                       let statusLabel = 'Pending'
@@ -1269,7 +1403,7 @@ function App() {
                                 <span className="text-slate-600">|</span>
                                 <span>Reject ({Math.round(rejections / 10_000_000)} XLM)</span>
                                 <span className="text-slate-600">|</span>
-                                <span>Quorum: {quorumPct.toFixed(0)}% / 51%</span>
+                                <span>Quorum: {votedCount}/{totalDonorCount} donors ({quorumPct.toFixed(0)}%)</span>
                               </div>
                               <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden flex">
                                 <div
@@ -1331,7 +1465,7 @@ function App() {
                                 Release
                               </button>
                             )}
-                            {st === 1 && hasVoted && quorumPct >= 51 && supermajorityPct >= 66 && (
+                            {st === 1 && hasVoted && totalDonorCount >= 2 && votedCount > totalDonorCount * 0.5 && supermajorityPct >= 66 && (
                               <button
                                 onClick={() => releaseMilestone(selectedCampaign.address, i)}
                                 disabled={isSending}
@@ -1419,7 +1553,7 @@ function App() {
               </div>
               <div className="flex gap-2">
                 <span className="text-cyan-400 font-bold shrink-0">3.</span>
-                <span>Vote to approve or reject each milestone. Quorum requires 51% participation</span>
+                <span>Vote to approve or reject each milestone. Quorum requires majority of donors to participate (min 2), plus 66% approval</span>
               </div>
               <div className="flex gap-2">
                 <span className="text-cyan-400 font-bold shrink-0">4.</span>
