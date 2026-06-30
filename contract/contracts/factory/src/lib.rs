@@ -17,6 +17,7 @@ pub enum DataKey {
     CampaignWasm,
     CampaignList,
     Nonce,
+    NftContract,
 }
 
 #[contract]
@@ -73,6 +74,18 @@ impl Factory {
             args,
         );
 
+        // Auto-set NFT contract on the campaign
+        let nft_contract: Option<Address> = env.storage().instance().get(&DataKey::NftContract);
+        if let Some(nft_addr) = nft_contract {
+            let mut nft_args: Vec<soroban_sdk::Val> = Vec::new(&env);
+            nft_args.push_back(nft_addr.into_val(&env));
+            let _ = env.invoke_contract::<soroban_sdk::Val>(
+                &campaign_addr,
+                &symbol_short!("set_nft"),
+                nft_args,
+            );
+        }
+
         let mut list: Vec<Address> = env
             .storage()
             .instance()
@@ -103,6 +116,16 @@ impl Factory {
             .get(&DataKey::CampaignList)
             .unwrap_or(Vec::new(&env));
         list.len()
+    }
+
+    pub fn set_nft_contract(env: Env, nft_contract: Address) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::NftContract, &nft_contract);
+    }
+
+    pub fn get_nft_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::NftContract)
     }
 }
 

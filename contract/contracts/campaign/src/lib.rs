@@ -1,7 +1,7 @@
 #![no_std]
 #[cfg(test)]
 extern crate std;
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, TryFromVal, Val, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, TryFromVal, Val, Vec, IntoVal};
 
 const VOTING_PERIOD: u64 = 7 * 24 * 60 * 60;
 const MIN_DONATION: i128 = 10_000_000; // 1 XLM minimum
@@ -38,10 +38,12 @@ pub enum DataKey {
     DonorTotal(Address),
     VoteApprovals(u32),
     VoteRejections(u32),
+    ApprovedVoters(u32),
     VotedStatus(u32, Address),
     VotedDonorCount(u32),
     VotingDeadline(u32),
     RefundClaimed(u32, Address),
+    NftContract,
 }
 
 #[contract]
@@ -144,6 +146,16 @@ impl Campaign {
         _cast_vote(&env, donor, index, false);
     }
 
+    pub fn set_nft(env: Env, nft_contract: Address) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::NftContract, &nft_contract);
+    }
+
+    pub fn get_nft_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::NftContract)
+    }
+
     pub fn release_milestone(env: Env, index: u32) {
         let mut milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).unwrap();
         let mut m = milestones.get(index).unwrap();
@@ -173,6 +185,34 @@ impl Campaign {
                 let raised: i128 = env.storage().instance().get(&DataKey::TotalRaised).unwrap_or(0);
                 assert!(raised >= released + ms_amount, "insufficient funds");
                 env.storage().instance().set(&DataKey::TotalReleased, &(released + ms_amount));
+
+                // Auto-mint NFTs for approved voters
+                let nft_contract: Option<Address> = env.storage().instance().get(&DataKey::NftContract);
+                if let Some(nft_addr) = nft_contract {
+                    let approved_voters: Vec<Address> = env.storage().persistent().get(&DataKey::ApprovedVoters(index)).unwrap_or(Vec::new(&env));
+                    if approved_voters.len() > 0 {
+                        let mut amounts = Vec::new(&env);
+                        let mut i = 0u32;
+                        while i < approved_voters.len() {
+                            let voter = approved_voters.get(i).unwrap();
+                            let donor_total: i128 = env.storage().persistent().get(&DataKey::DonorTotal(voter)).unwrap_or(0);
+                            amounts.push_back(donor_total);
+                            i += 1;
+                        }
+                        let campaign_addr = env.current_contract_address();
+                        let mut args: Vec<Val> = Vec::new(&env);
+                        args.push_back(env.current_contract_address().into_val(&env));
+                        args.push_back(approved_voters.into_val(&env));
+                        args.push_back(campaign_addr.into_val(&env));
+                        args.push_back(index.into_val(&env));
+                        args.push_back(amounts.into_val(&env));
+                        let _: Val = env.invoke_contract::<Val>(
+                            &nft_addr,
+                            &symbol_short!("bmint"),
+                            args,
+                        );
+                    }
+                }
 
                 env.events().publish((symbol_short!("ms_appr"),), (index, ms_amount));
             } else if now > voting_deadline {
@@ -271,6 +311,10 @@ impl Campaign {
         env.storage().persistent().get(&DataKey::VotedDonorCount(index)).unwrap_or(0)
     }
 
+    pub fn get_approved_voters(env: Env, index: u32) -> Vec<Address> {
+        env.storage().persistent().get(&DataKey::ApprovedVoters(index)).unwrap_or(Vec::new(&env))
+    }
+
     pub fn get_has_voted(env: Env, donor: Address, index: u32) -> bool {
         env.storage().persistent().get(&DataKey::VotedStatus(index, donor)).unwrap_or(false)
     }
@@ -303,6 +347,14 @@ fn _cast_vote(env: &Env, donor: Address, index: u32, approve: bool) {
     if approve {
         let approvals: i128 = env.storage().persistent().get(&DataKey::VoteApprovals(index)).unwrap_or(0);
         env.storage().persistent().set(&DataKey::VoteApprovals(index), &(approvals + donor_total));
+        
+        // Store approve voter
+        let mut approved_voters: Vec<Address> = env.storage().persistent().get(&DataKey::ApprovedVoters(index)).unwrap_or(Vec::new(&env));
+        if !approved_voters.contains(&donor) {
+            approved_voters.push_back(donor.clone());
+            env.storage().persistent().set(&DataKey::ApprovedVoters(index), &approved_voters);
+        }
+        
         env.events().publish((symbol_short!("vote_a"),), (donor, index));
     } else {
         let rejections: i128 = env.storage().persistent().get(&DataKey::VoteRejections(index)).unwrap_or(0);
