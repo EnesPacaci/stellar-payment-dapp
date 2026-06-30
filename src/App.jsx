@@ -14,6 +14,8 @@ import CampaignCard from './components/CampaignCard'
 import DonateForm from './components/DonateForm'
 import RecentDonations from './components/RecentDonations'
 import CreateCampaign from './components/CreateCampaign'
+import FeedbackForm from './components/FeedbackForm'
+import NftModal from './components/NftModal'
 import { CONTRACT_ADDRESSES, SOROBAN_RPC_URL, HORIZON_URL, NETWORK_PASSPHRASE } from './config'
 
 const HORIZON_SERVER = new Horizon.Server(HORIZON_URL)
@@ -24,16 +26,16 @@ const factoryContract = new Contract(FACTORY_ID)
 function parseMilestoneStatus(status) {
   if (status == null) return 0
   if (typeof status === 'number') return status
-  if (typeof status === 'string') return ({ Pending: 0, Completed: 1, Approved: 2 })[status] ?? 0
+  if (typeof status === 'string') return ({ Pending: 0, Submitted: 1, Completed: 1, Approved: 2, Rejected: 3 })[status] ?? 0
   if (typeof status === 'object') {
     const inner = status[0] ?? status['0']
-    if (typeof inner === 'string') return ({ Pending: 0, Completed: 1, Approved: 2 })[inner] ?? 0
-    for (const key of ['Pending', 'Completed', 'Approved']) {
-      if (key in status) return ({ Pending: 0, Completed: 1, Approved: 2 })[key]
+    if (typeof inner === 'string') return ({ Pending: 0, Submitted: 1, Completed: 1, Approved: 2, Rejected: 3 })[inner] ?? 0
+    for (const key of ['Pending', 'Submitted', 'Completed', 'Approved', 'Rejected']) {
+      if (key in status) return ({ Pending: 0, Submitted: 1, Completed: 1, Approved: 2, Rejected: 3 })[key]
     }
-    if (status.tag) return ({ Pending: 0, Completed: 1, Approved: 2 })[status.tag] ?? 0
-    if (status._arm) return ({ Pending: 0, Completed: 1, Approved: 2 })[status._arm] ?? 0
-    if (status.value) return ({ Pending: 0, Completed: 1, Approved: 2 })[status.value] ?? 0
+    if (status.tag) return ({ Pending: 0, Submitted: 1, Completed: 1, Approved: 2, Rejected: 3 })[status.tag] ?? 0
+    if (status._arm) return ({ Pending: 0, Submitted: 1, Completed: 1, Approved: 2, Rejected: 3 })[status._arm] ?? 0
+    if (status.value) return ({ Pending: 0, Submitted: 1, Completed: 1, Approved: 2, Rejected: 3 })[status.value] ?? 0
   }
   return 0
 }
@@ -41,20 +43,23 @@ function parseMilestoneStatus(status) {
 function parseContractError(error, context) {
   const msg = error?.message || String(error) || ''
   if (msg.includes('rejected') || msg.includes('User rejected')) return 'Transaction rejected by user.'
-  if (msg.includes('insufficient') || msg.includes('underfunded') || msg.includes('Insufficient')) {
-    if (context === 'approve') return 'Insufficient funds to release this milestone. Donate more XLM first.'
-    return 'Insufficient balance for this action.'
-  }
+  if (msg.includes('insufficient') || msg.includes('underfunded') || msg.includes('Insufficient')) return 'Insufficient balance for this action.'
   if (msg.includes('account') && msg.includes('not found')) return 'Account not found on testnet. Get XLM from friendbot first.'
-  if (msg.includes('MissingValue') || msg.includes('non-existing value')) return 'Campaign data not found on-chain. The contract may still be initializing.'
-  if (msg.includes('UnreachableCodeReached') || msg.includes('WasmVm')) {
-    if (context === 'approve') return 'Cannot approve this milestone. Ensure it has been submitted and there are enough released funds.'
-    if (context === 'submit') return 'Cannot submit this milestone. It may have already been submitted or is not in pending status.'
-    return 'Smart contract error. Please try again.'
-  }
-  if (msg.includes('not completed')) return 'This milestone has not been submitted yet. Submit it first.'
-  if (msg.includes('not pending')) return 'This milestone has already been submitted.'
-  if (msg.includes('only admin')) return 'Only the campaign creator can perform this action.'
+  if (msg.includes('MissingValue') || msg.includes('non-existing value')) return 'Campaign data not found on-chain.'
+  if (msg.includes('only donors can vote')) return 'Only donors who have contributed to this campaign can vote.'
+  if (msg.includes('already voted')) return 'You have already voted on this milestone.'
+  if (msg.includes('voting period has ended')) return 'The voting period for this milestone has ended.'
+  if (msg.includes('voting still open')) return 'Voting is still in progress. Wait for the deadline or more votes.'
+  if (msg.includes('quorum not yet met')) return 'Not enough donors have voted yet. Quorum not reached.'
+  if (msg.includes('milestone not submitted')) return 'This milestone has not been submitted for voting yet.'
+  if (msg.includes('milestone not rejected')) return 'This milestone has not been rejected. Refunds are not available.'
+  if (msg.includes('refund already claimed')) return 'You have already claimed your refund for this milestone.'
+  if (msg.includes('no donation to refund')) return 'No donation found to refund.'
+  if (msg.includes('refund amount is zero')) return 'Refund amount is zero. You may not be eligible.'
+  if (msg.includes('only admin can submit')) return 'Only the campaign creator can submit milestones.'
+  if (msg.includes('milestone not pending')) return 'This milestone has already been submitted.'
+  if (msg.includes('not completed')) return 'This milestone has not been submitted yet.'
+  if (msg.includes('campaign deadline has passed')) return 'The campaign deadline has passed. No more milestones can be submitted.'
   return `Transaction failed: ${msg.slice(0, 120)}`
 }
 
@@ -76,8 +81,10 @@ function App() {
     setPublicKey, setBalance, setWalletName, setStatus, setTxHash,
     setIsSending, setTotalRaised, setGoal, setDeadline, setRecentDonors,
     setDonationCount, resetWallet, publicKey, selectedCampaign,
-    setSelectedCampaign, setCampaigns, campaigns,     setIsLoadingCampaigns, isSending,
-    showCreateForm, setShowCreateForm,
+    setSelectedCampaign, setCampaigns, campaigns, setIsLoadingCampaigns, isSending,
+    showCreateForm, setShowCreateForm, showNftModal, setShowNftModal,
+    nftTokens, setNftTokens, showFeedbackForm, setShowFeedbackForm,
+    feedbackSubmitted, setFeedbackSubmitted,
   } = useStore()
 
   const fireConfetti = () => {
@@ -188,20 +195,77 @@ function App() {
     }
   }, [publicKey])
 
+  const fetchVoteStatus = useCallback(async (addr) => {
+    if (!addr) return { milestones: [], donorTotal: '0', totalVoterWeight: '0' }
+    try {
+      const milestones = []
+      const info = await invokeCampaignRead(addr, 'get_milestones')
+      const count = Array.isArray(info) ? info.length : 0
+      for (let i = 0; i < count; i++) {
+        const status = await invokeCampaignRead(addr, 'get_vote_status', nativeToScVal(i, { type: 'u32' }))
+        milestones.push({
+          approvals: status ? String(status[0] || '0') : '0',
+          rejections: status ? String(status[1] || '0') : '0',
+          deadline: status ? Number(status[2] || 0) : 0,
+        })
+      }
+      const donorTotal = publicKey
+        ? (await invokeCampaignRead(addr, 'get_donor_total', nativeToScVal(new Address(publicKey), { type: 'address' }))) || '0'
+        : '0'
+      const totalVoterWeight = (await invokeCampaignRead(addr, 'get_total_voter_weight')) || '0'
+      const hasVoted = []
+      for (let i = 0; i < count; i++) {
+        if (publicKey) {
+          const voted = await invokeCampaignRead(addr, 'get_has_voted',
+            nativeToScVal(new Address(publicKey), { type: 'address' }),
+            nativeToScVal(i, { type: 'u32' })
+          )
+          hasVoted[i] = !!voted
+        } else {
+          hasVoted[i] = false
+        }
+      }
+      const refundClaimed = []
+      for (let i = 0; i < count; i++) {
+        if (publicKey) {
+          const claimed = await invokeCampaignRead(addr, 'get_refund_claimed',
+            nativeToScVal(new Address(publicKey), { type: 'address' }),
+            nativeToScVal(i, { type: 'u32' })
+          )
+          refundClaimed[i] = !!claimed
+        } else {
+          refundClaimed[i] = false
+        }
+      }
+      return { milestones, donorTotal: String(donorTotal), totalVoterWeight: String(totalVoterWeight), hasVoted, refundClaimed }
+    } catch {
+      return { milestones: [], donorTotal: '0', totalVoterWeight: '0', hasVoted: [], refundClaimed: [] }
+    }
+  }, [invokeCampaignRead, publicKey])
+
   const fetchSingleCampaign = useCallback(async (addr) => {
     try {
-      const [info, name, rawMilestones, totalReleased] = await Promise.all([
+      const [info, name, rawMilestones, totalReleased, voteData] = await Promise.all([
         invokeCampaignRead(addr, 'get_info'),
         invokeCampaignRead(addr, 'get_name'),
         invokeCampaignRead(addr, 'get_milestones'),
         invokeCampaignRead(addr, 'get_total_released'),
+        fetchVoteStatus(addr),
       ])
       if (!info) return null
       const [goal, raised, deadline] = info
       const milestones = Array.isArray(rawMilestones)
-        ? rawMilestones.map((m) => {
+        ? rawMilestones.map((m, i) => {
             const st = parseMilestoneStatus(m.status)
-            return { amount: String(m.amount || '0'), description: String(m.description || ''), status: st }
+            const vs = voteData?.milestones?.[i]
+            return {
+              amount: String(m.amount || '0'),
+              description: String(m.description || ''),
+              status: st,
+              approvals: vs?.approvals || '0',
+              rejections: vs?.rejections || '0',
+              voteDeadline: vs?.deadline || 0,
+            }
           })
         : []
       return {
@@ -212,11 +276,15 @@ function App() {
         deadline: Number(deadline),
         milestones,
         totalReleased: String(totalReleased || '0'),
+        donorTotal: voteData?.donorTotal || '0',
+        totalVoterWeight: voteData?.totalVoterWeight || '0',
+        hasVoted: voteData?.hasVoted || [],
+        refundClaimed: voteData?.refundClaimed || [],
       }
     } catch {
       return null
     }
-  }, [invokeCampaignRead])
+  }, [invokeCampaignRead, fetchVoteStatus])
 
   const fetchCampaigns = useCallback(async () => {
     setIsLoadingCampaigns(true)
@@ -302,6 +370,44 @@ function App() {
     } catch {}
   }, [setDonationCount, setRecentDonors, selectedCampaign])
 
+  const fetchNftTokens = useCallback(async () => {
+    if (!publicKey) return
+    try {
+      const nftContract = new Contract(CONTRACT_ADDRESSES.rewardNft)
+      const sourceAccount = await HORIZON_SERVER.loadAccount(publicKey || 'GDGGSUZ42XTYN5MLZGLNNUGO446SVL6XVZQQSPTSCEM2PCHCRZCW3X3C')
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: '100',
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(nftContract.call('get_owner_tokens', nativeToScVal(new Address(publicKey), { type: 'address' })))
+        .setTimeout(30)
+        .build()
+      const result = await SOROBAN_SERVER.simulateTransaction(tx)
+      if (result.error) throw result.error
+      const retval = result.result?.retval
+      if (!retval) { setNftTokens([]); return }
+      const tokenIds = scValToNative(retval)
+      if (!Array.isArray(tokenIds)) { setNftTokens([]); return }
+
+      const tokens = await Promise.all(tokenIds.map(async (tid) => {
+        try {
+          const meta = await invokeCampaignRead(CONTRACT_ADDRESSES.rewardNft, 'get_token_metadata', nativeToScVal(tid, { type: 'u32' }))
+          if (!meta) return null
+          return {
+            tokenId: tid,
+            campaign: meta.campaign || '',
+            milestoneId: Number(meta.milestone_id || 0),
+            amount: String(meta.amount || '0'),
+            timestamp: Number(meta.timestamp || 0),
+          }
+        } catch { return null }
+      }))
+      setNftTokens(tokens.filter(Boolean))
+    } catch {
+      setNftTokens([])
+    }
+  }, [publicKey, invokeCampaignRead, setNftTokens])
+
   useEffect(() => {
     fetchCampaigns()
   }, [])
@@ -316,7 +422,9 @@ function App() {
   useEffect(() => {
     let timeout
     const poll = async () => {
-      if (!isSending) await fetchCampaigns()
+      if (!isSending) {
+        await fetchCampaigns()
+      }
       timeout = setTimeout(poll, 15000)
     }
     timeout = setTimeout(poll, 15000)
@@ -448,6 +556,8 @@ function App() {
         setCampaigns(currentCampaigns.map(c => c.address === selectedCampaign.address ? updatedCampaign : c))
       }
       useStore.getState().setAmount('')
+
+      setShowFeedbackForm(true)
     } catch (error) {
       console.error('Transaction failed', error)
       setStatus(parseContractError(error, 'donate'))
@@ -601,6 +711,7 @@ function App() {
       const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
       const result = await HORIZON_SERVER.submitTransaction(signedTx)
       setStatus('Milestone submitted successfully!')
+      setTxHash(result.hash)
       fireConfetti()
       if (selectedCampaign) {
         const ms = [...selectedCampaign.milestones]
@@ -624,34 +735,17 @@ function App() {
     }
   }
 
-  const approveMilestone = async (campaignAddr, index) => {
+  const voteOnMilestone = async (campaignAddr, index, approve) => {
     if (!publicKey) return
     const campaign = useStore.getState().campaigns.find(c => c.address === campaignAddr) || selectedCampaign
-    if (campaign) {
-      const ms = campaign.milestones[index]
-      if (ms && ms.status !== 1) {
-        if (ms.status === 0) {
-          setStatus('This milestone has not been submitted yet. Submit it first.')
-          setIsSending(false)
-          return
-        }
-        if (ms.status === 2) {
-          setStatus('This milestone has already been approved.')
-          setIsSending(false)
-          return
-        }
-      }
-      const raised = BigInt(campaign.raised || '0')
-      const released = BigInt(campaign.totalReleased || '0')
-      const msAmount = BigInt(ms?.amount || '0')
-      if (raised < released + msAmount) {
-        setStatus('Insufficient funds to release this milestone. Donate more XLM first.')
-        setIsSending(false)
-        return
-      }
+    if (campaign && campaign.hasVoted?.[index]) {
+      setStatus('You have already voted on this milestone.')
+      return
     }
+    const action = approve ? 'vote_approve' : 'vote_reject'
+    const label = approve ? 'Approve' : 'Reject'
     setIsSending(true)
-    setStatus('Approving milestone...')
+    setStatus(`Casting ${label.toLowerCase()} vote...`)
     setTxHash('')
     try {
       const account = await HORIZON_SERVER.loadAccount(publicKey)
@@ -662,7 +756,7 @@ function App() {
       })
         .addOperation(
           campaignContract.call(
-            'approve_milestone',
+            action,
             nativeToScVal(new Address(publicKey), { type: 'address' }),
             nativeToScVal(index, { type: 'u32' })
           )
@@ -683,18 +777,75 @@ function App() {
       setStatus('Submitting to network...')
       const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
       const result = await HORIZON_SERVER.submitTransaction(signedTx)
-      setStatus('Milestone approved & funds released!')
+      setStatus(`${label} vote cast successfully!`)
+      setTxHash(result.hash)
       fireConfetti()
-      if (selectedCampaign) {
-        const ms = [...selectedCampaign.milestones]
-        const msAmount = ms[index].amount
-        ms[index] = { ...ms[index], status: 2 }
-        const newReleased = String(BigInt(selectedCampaign.totalReleased || '0') + BigInt(msAmount))
-        const updated = { ...selectedCampaign, milestones: ms, totalReleased: newReleased }
-        setSelectedCampaign(updated)
-        const current = useStore.getState().campaigns
-        setCampaigns(current.map(c => c.address === campaignAddr ? updated : c))
+
+      const voterKey = `crowdfund_voters_${campaignAddr}_${index}`
+      const existingVoters = JSON.parse(localStorage.getItem(voterKey) || '[]')
+      if (!existingVoters.find(v => v.address === publicKey)) {
+        existingVoters.push({
+          address: publicKey,
+          amount: String(selectedCampaign?.donorTotal || '0'),
+          approve,
+        })
+        localStorage.setItem(voterKey, JSON.stringify(existingVoters))
       }
+
+      setTimeout(async () => {
+        const still = useStore.getState().selectedCampaign
+        if (!still || still.address !== campaignAddr) return
+        const fresh = await fetchSingleCampaign(campaignAddr)
+        if (fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === campaignAddr) setSelectedCampaign(fresh)
+      }, 3000)
+
+      setShowFeedbackForm(true)
+    } catch (error) {
+      console.error(`${label} vote failed`, error)
+      setStatus(parseContractError(error, 'vote'))
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const releaseMilestone = async (campaignAddr, index) => {
+    if (!publicKey) return
+    setIsSending(true)
+    setStatus('Checking votes and releasing milestone...')
+    setTxHash('')
+    try {
+      const account = await HORIZON_SERVER.loadAccount(publicKey)
+      const campaignContract = new Contract(campaignAddr)
+      const transaction = new TransactionBuilder(account, {
+        fee: await HORIZON_SERVER.fetchBaseFee(),
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          campaignContract.call(
+            'release_milestone',
+            nativeToScVal(index, { type: 'u32' })
+          )
+        )
+        .setTimeout(60)
+        .build()
+
+      setStatus('Simulating transaction...')
+      const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
+      if (simResult.error) throw simResult.error
+      const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
+
+      setStatus('Waiting for wallet signature...')
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      setStatus('Submitting to network...')
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+      const result = await HORIZON_SERVER.submitTransaction(signedTx)
+      setStatus('Milestone released successfully!')
+      setTxHash(result.hash)
+      fireConfetti()
+
       setTimeout(async () => {
         const still = useStore.getState().selectedCampaign
         if (!still || still.address !== campaignAddr) return
@@ -702,8 +853,131 @@ function App() {
         if (fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === campaignAddr) setSelectedCampaign(fresh)
       }, 3000)
     } catch (error) {
-      console.error('Approve milestone failed', error)
-      setStatus(parseContractError(error, 'approve'))
+      console.error('Release milestone failed', error)
+      setStatus(parseContractError(error, 'release'))
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const claimRefund = async (campaignAddr, index) => {
+    if (!publicKey) return
+    const campaign = useStore.getState().campaigns.find(c => c.address === campaignAddr) || selectedCampaign
+    if (campaign && campaign.refundClaimed?.[index]) {
+      setStatus('You have already claimed your refund for this milestone.')
+      return
+    }
+    setIsSending(true)
+    setStatus('Claiming refund...')
+    setTxHash('')
+    try {
+      const account = await HORIZON_SERVER.loadAccount(publicKey)
+      const campaignContract = new Contract(campaignAddr)
+      const transaction = new TransactionBuilder(account, {
+        fee: await HORIZON_SERVER.fetchBaseFee(),
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          campaignContract.call(
+            'claim_refund',
+            nativeToScVal(new Address(publicKey), { type: 'address' }),
+            nativeToScVal(index, { type: 'u32' })
+          )
+        )
+        .setTimeout(60)
+        .build()
+
+      setStatus('Simulating transaction...')
+      const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
+      if (simResult.error) throw simResult.error
+      const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
+
+      setStatus('Waiting for wallet signature...')
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      setStatus('Submitting to network...')
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+      const result = await HORIZON_SERVER.submitTransaction(signedTx)
+      setStatus('Refund claimed successfully!')
+      setTxHash(result.hash)
+      fireConfetti()
+
+      setTimeout(async () => {
+        const still = useStore.getState().selectedCampaign
+        if (!still || still.address !== campaignAddr) return
+        const fresh = await fetchSingleCampaign(campaignAddr)
+        if (fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === campaignAddr) setSelectedCampaign(fresh)
+      }, 3000)
+    } catch (error) {
+      console.error('Claim refund failed', error)
+      setStatus(parseContractError(error, 'refund'))
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const mintNfts = async (campaignAddr, milestoneIndex) => {
+    if (!publicKey) return
+    setIsSending(true)
+    setStatus('Minting NFTs for voters...')
+    setTxHash('')
+    try {
+      const voterKey = `crowdfund_voters_${campaignAddr}_${milestoneIndex}`
+      const voters = JSON.parse(localStorage.getItem(voterKey) || '[]')
+      const approvedVoters = voters.filter(v => v.approve)
+      if (approvedVoters.length === 0) {
+        setStatus('No approved voters found for this milestone.')
+        setIsSending(false)
+        return
+      }
+
+      const account = await HORIZON_SERVER.loadAccount(publicKey)
+      const nftContract = new Contract(CONTRACT_ADDRESSES.rewardNft)
+
+      const tx = new TransactionBuilder(account, {
+        fee: await HORIZON_SERVER.fetchBaseFee(),
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      for (const voter of approvedVoters) {
+        const voterAmount = BigInt(voter.amount || '0')
+        tx.addOperation(
+          nftContract.call(
+            'mint',
+            nativeToScVal(new Address(publicKey), { type: 'address' }),
+            nativeToScVal(new Address(voter.address), { type: 'address' }),
+            nativeToScVal(new Address(campaignAddr), { type: 'address' }),
+            nativeToScVal(milestoneIndex, { type: 'u32' }),
+            nativeToScVal(voterAmount, { type: 'i128' })
+          )
+        )
+      }
+
+      const transaction = tx.setTimeout(60).build()
+
+      setStatus('Simulating transaction...')
+      const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
+      if (simResult.error) throw simResult.error
+      const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
+
+      setStatus('Waiting for wallet signature...')
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      setStatus('Submitting to network...')
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+      const result = await HORIZON_SERVER.submitTransaction(signedTx)
+      setStatus(`${approvedVoters.length} NFT(s) minted successfully!`)
+      setTxHash(result.hash)
+      fireConfetti()
+
+      await fetchNftTokens()
+    } catch (error) {
+      console.error('Mint NFTs failed', error)
+      setStatus(parseContractError(error, 'mint'))
     } finally {
       setIsSending(false)
     }
@@ -732,7 +1006,28 @@ function App() {
         style={{ zIndex: 9999 }}
       />
 
-      <Header onConnect={connectWallet} onDisconnect={disconnectWallet} />
+      <Header
+        onConnect={connectWallet}
+        onDisconnect={disconnectWallet}
+        onShowNft={() => {
+          fetchNftTokens()
+          setShowNftModal(true)
+        }}
+      />
+
+      {showNftModal && (
+        <NftModal
+          tokens={nftTokens}
+          onClose={() => setShowNftModal(false)}
+        />
+      )}
+
+      {showFeedbackForm && (
+        <FeedbackForm
+          onClose={() => setShowFeedbackForm(false)}
+          onSubmit={() => setFeedbackSubmitted(true)}
+        />
+      )}
 
       <main className="max-w-2xl mx-auto mt-8 sm:mt-12 px-4 sm:px-5">
         <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
@@ -850,23 +1145,71 @@ function App() {
                 compact
               />
 
-                    {selectedCampaign.milestones && selectedCampaign.milestones.length > 0 && (
+              {selectedCampaign.milestones && selectedCampaign.milestones.length > 0 && (
                 <div className="mt-6 mb-4">
                   <div className="text-xs text-slate-500 mb-3">Milestones</div>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {selectedCampaign.milestones.map((ms, i) => {
                       const msXLM = (Number(ms.amount) / 10_000_000).toFixed(0)
                       const st = parseMilestoneStatus(ms.status)
-                      const statusLabel = st === 0 ? 'Pending' : st === 1 ? 'Submitted' : 'Approved'
-                      const statusColor = st === 0 ? 'text-slate-500' : st === 1 ? 'text-yellow-400' : 'text-green-400'
+                      const now = Math.floor(Date.now() / 1000)
+                      const votingOpen = st === 1 && ms.voteDeadline > now
+                      const votingEnded = st === 1 && ms.voteDeadline > 0 && now >= ms.voteDeadline
+                      const approvals = Number(ms.approvals || '0')
+                      const rejections = Number(ms.rejections || '0')
+                      const totalVoted = approvals + rejections
+                      const totalVoterWeight = Number(selectedCampaign.totalVoterWeight || '0')
+                      const quorumPct = totalVoterWeight > 0 ? (totalVoted / totalVoterWeight) * 100 : 0
+                      const supermajorityPct = totalVoted > 0 ? (approvals / totalVoted) * 100 : 0
+                      const donorWeight = Number(selectedCampaign.donorTotal || '0')
+                      const hasVoted = selectedCampaign.hasVoted?.[i]
+                      const refundClaimed = selectedCampaign.refundClaimed?.[i]
+                      const deadlineDate = ms.voteDeadline ? new Date(ms.voteDeadline * 1000) : null
+                      const timeLeft = deadlineDate ? Math.max(0, Math.ceil((deadlineDate - new Date()) / 1000)) : 0
+
+                      let statusColor = 'text-slate-500'
+                      let statusLabel = 'Pending'
+                      if (st === 1) { statusColor = 'text-yellow-400'; statusLabel = votingEnded ? 'Voting Ended' : 'Submitted' }
+                      if (st === 2) { statusColor = 'text-green-400'; statusLabel = 'Approved' }
+                      if (st === 3) { statusColor = 'text-red-400'; statusLabel = 'Rejected' }
+
                       return (
-                        <div key={i} className="bg-slate-900 rounded-lg p-3 border border-slate-700 flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="text-xs font-medium text-white">{ms.description}</div>
-                            <div className="text-[11px] text-slate-500 font-mono">{msXLM} XLM</div>
-                          </div>
-                          <div className="flex items-center gap-2">
+                        <div key={i} className="bg-slate-900 rounded-lg p-3 border border-slate-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex-1">
+                              <div className="text-xs font-medium text-white">{ms.description}</div>
+                              <div className="text-[11px] text-slate-500 font-mono">{msXLM} XLM</div>
+                            </div>
                             <span className={`text-[11px] font-medium ${statusColor}`}>{statusLabel}</span>
+                          </div>
+
+                          {st === 1 && votingOpen && (
+                            <div className="mb-2 space-y-1.5">
+                              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                <span>Approve ({Math.round(approvals / 10_000_000)} XLM)</span>
+                                <span className="text-slate-600">|</span>
+                                <span>Reject ({Math.round(rejections / 10_000_000)} XLM)</span>
+                                <span className="text-slate-600">|</span>
+                                <span>Quorum: {quorumPct.toFixed(0)}% / 51%</span>
+                              </div>
+                              <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden flex">
+                                <div
+                                  className="h-full bg-green-500 transition-all"
+                                  style={{ width: `${totalVoted > 0 ? (approvals / totalVoted) * 100 : 0}%` }}
+                                />
+                                <div
+                                  className="h-full bg-red-500 transition-all"
+                                  style={{ width: `${totalVoted > 0 ? (rejections / totalVoted) * 100 : 0}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between text-[10px] text-slate-600">
+                                <span>Supermajority: {supermajorityPct.toFixed(0)}% / 66%</span>
+                                <span>{timeLeft > 0 ? `${Math.floor(timeLeft / 3600)}h ${Math.floor((timeLeft % 3600) / 60)}m left` : 'Deadline passed'}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             {st === 0 && (
                               <button
                                 onClick={() => submitMilestone(selectedCampaign.address, i)}
@@ -876,14 +1219,59 @@ function App() {
                                 Submit
                               </button>
                             )}
-                            {st === 1 && (
+                            {st === 1 && votingOpen && !hasVoted && donorWeight > 0 && (
+                              <>
+                                <button
+                                  onClick={() => voteOnMilestone(selectedCampaign.address, i, true)}
+                                  disabled={isSending}
+                                  className="text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-50"
+                                >
+                                  Approve ({(donorWeight / 10_000_000).toFixed(0)} XLM)
+                                </button>
+                                <button
+                                  onClick={() => voteOnMilestone(selectedCampaign.address, i, false)}
+                                  disabled={isSending}
+                                  className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                                >
+                                  Reject ({(donorWeight / 10_000_000).toFixed(0)} XLM)
+                                </button>
+                              </>
+                            )}
+                            {st === 1 && hasVoted && (
+                              <span className="text-[10px] text-slate-500">You voted</span>
+                            )}
+                            {st === 1 && !hasVoted && donorWeight === 0 && (
+                              <span className="text-[10px] text-slate-600">Donate to vote</span>
+                            )}
+                            {st === 1 && !hasVoted && (votingEnded || (!votingOpen && ms.voteDeadline > 0)) && (
                               <button
-                                onClick={() => approveMilestone(selectedCampaign.address, i)}
+                                onClick={() => releaseMilestone(selectedCampaign.address, i)}
                                 disabled={isSending}
-                                className="text-[10px] px-2 py-1 rounded bg-green-400/10 text-green-400 hover:bg-green-400/20 transition-colors disabled:opacity-50"
+                                className="text-[10px] px-2 py-1 rounded bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors disabled:opacity-50"
                               >
-                                Approve
+                                Release
                               </button>
+                            )}
+                            {st === 2 && (
+                              <button
+                                onClick={() => mintNfts(selectedCampaign.address, i)}
+                                disabled={isSending}
+                                className="text-[10px] px-2 py-1 rounded bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-50"
+                              >
+                                Mint NFTs
+                              </button>
+                            )}
+                            {st === 3 && !refundClaimed && (
+                              <button
+                                onClick={() => claimRefund(selectedCampaign.address, i)}
+                                disabled={isSending}
+                                className="text-[10px] px-2 py-1 rounded bg-orange-400/10 text-orange-400 hover:bg-orange-400/20 transition-colors disabled:opacity-50"
+                              >
+                                Claim Refund
+                              </button>
+                            )}
+                            {st === 3 && refundClaimed && (
+                              <span className="text-[10px] text-slate-500">Refund claimed</span>
                             )}
                           </div>
                         </div>
