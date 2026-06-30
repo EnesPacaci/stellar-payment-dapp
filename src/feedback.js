@@ -19,7 +19,7 @@ export async function submitOnChainFeedback(publicKey, campaignAddress, rating, 
     .addOperation(
       campaignContract.call(
         'submit_feedback',
-        nativeToScVal(new Address(publicKey), { type: 'address' }),
+        new Address(publicKey).toScVal(),
         nativeToScVal(rating, { type: 'u32' }),
         nativeToScVal(comment || '', { type: 'string' })
       )

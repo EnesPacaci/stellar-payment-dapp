@@ -15,22 +15,22 @@ export default function CampaignCard({ campaigns = [], onSelect, compact = false
         )}
         <div className="flex justify-between mb-6">
           <div className="text-center flex-1">
-            <div className="text-2xl font-bold text-cyan-400 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-cyan-400 font-mono">
               {raisedXLM.toFixed(2)}
             </div>
-            <div className="text-xs text-slate-400 mt-1">Raised (XLM)</div>
+            <div className="text-[10px] sm:text-xs text-slate-400 mt-1">Raised (XLM)</div>
           </div>
           <div className="text-center flex-1">
-            <div className="text-2xl font-bold text-cyan-400 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-cyan-400 font-mono">
               {goalXLM.toFixed(2)}
             </div>
-            <div className="text-xs text-slate-400 mt-1">Goal (XLM)</div>
+            <div className="text-[10px] sm:text-xs text-slate-400 mt-1">Goal (XLM)</div>
           </div>
           <div className="text-center flex-1">
-            <div className="text-2xl font-bold text-cyan-400 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-cyan-400 font-mono">
               {progressPct.toFixed(1)}%
             </div>
-            <div className="text-xs text-slate-400 mt-1">Funded</div>
+            <div className="text-[10px] sm:text-xs text-slate-400 mt-1">Funded</div>
           </div>
         </div>
 

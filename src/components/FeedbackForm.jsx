@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import useStore from '../store'
-import { submitOnChainFeedback } from '../feedback'
+import { submitOnChainFeedback, fetchOnChainFeedback } from '../feedback'
 
 export default function FeedbackForm({ onClose, onSubmit }) {
   const [rating, setRating] = useState(0)
@@ -16,6 +16,16 @@ export default function FeedbackForm({ onClose, onSubmit }) {
     if (rating === 0 || isSubmitting || !publicKey) return
     setIsSubmitting(true)
     try {
+      // Check if user already submitted feedback before attempting on-chain call
+      const feedbacks = await fetchOnChainFeedback(selectedCampaign?.address)
+      const alreadySubmitted = feedbacks.some(fb => fb.user === publicKey)
+      
+      if (alreadySubmitted) {
+        setStatus('You have already submitted feedback for this campaign!')
+        setIsSubmitting(false)
+        return
+      }
+
       await submitOnChainFeedback(publicKey, selectedCampaign?.address, rating, comment)
       setSubmitted(true)
       onSubmit()
