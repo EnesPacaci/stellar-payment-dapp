@@ -248,12 +248,13 @@ function App() {
 
   const fetchSingleCampaign = useCallback(async (addr) => {
     try {
-      const [info, name, rawMilestones, totalReleased, voteData] = await Promise.all([
+      const [info, name, rawMilestones, totalReleased, voteData, admin] = await Promise.all([
         invokeCampaignRead(addr, 'get_info'),
         invokeCampaignRead(addr, 'get_name'),
         invokeCampaignRead(addr, 'get_milestones'),
         invokeCampaignRead(addr, 'get_total_released'),
         fetchVoteStatus(addr),
+        invokeCampaignRead(addr, 'get_admin'),
       ])
       if (!info) return null
       const [goal, raised, deadline] = info
@@ -283,6 +284,7 @@ function App() {
         totalVoterWeight: voteData?.totalVoterWeight || '0',
         hasVoted: voteData?.hasVoted || [],
         refundClaimed: voteData?.refundClaimed || [],
+        admin: admin || '',
       }
     } catch {
       return null
@@ -1329,7 +1331,7 @@ function App() {
                                 Release
                               </button>
                             )}
-                            {st === 2 && (
+                            {st === 2 && publicKey && selectedCampaign.admin === publicKey && (
                               <button
                                 onClick={() => mintNfts(selectedCampaign.address, i)}
                                 disabled={isSending}

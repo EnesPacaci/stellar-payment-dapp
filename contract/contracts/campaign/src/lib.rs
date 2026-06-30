@@ -232,6 +232,10 @@ impl Campaign {
         env.storage().instance().get(&DataKey::Name).unwrap_or(String::from_str(&env, ""))
     }
 
+    pub fn get_admin(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    }
+
     pub fn get_vote_status(env: Env, index: u32) -> (i128, i128, u64) {
         let approvals: i128 = env.storage().persistent().get(&DataKey::VoteApprovals(index)).unwrap_or(0);
         let rejections: i128 = env.storage().persistent().get(&DataKey::VoteRejections(index)).unwrap_or(0);
@@ -347,6 +351,8 @@ mod tests {
             &1000000,
             &milestones,
         );
+
+        assert_eq!(client.get_admin(), admin);
 
         assert_eq!(client.get_goal(), 1000);
         assert_eq!(client.get_total_raised(), 0);
