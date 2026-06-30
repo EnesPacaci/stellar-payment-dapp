@@ -20,7 +20,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
                 {
-                  "i128": "900"
+                  "i128": "900000000"
                 }
               ]
             }
@@ -42,7 +42,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "i128": "100"
+                  "i128": "100000000"
                 }
               ]
             }
@@ -150,7 +150,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "900"
+                "i128": "900000000"
               }
             }
           },
@@ -177,7 +177,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "100"
+                "i128": "100000000"
               }
             }
           },
@@ -204,7 +204,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "900"
+                "i128": "900000000"
               }
             }
           },
@@ -231,7 +231,34 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "100"
+                "i128": "100000000"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 0
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "VotedDonorCount"
+                  },
+                  {
+                    "u32": 0
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "i128": "2"
               }
             }
           },
@@ -386,7 +413,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "1000"
+                        "i128": "1000000000"
                       }
                     },
                     {
@@ -406,7 +433,7 @@
                                   "symbol": "amount"
                                 },
                                 "val": {
-                                  "i128": "300"
+                                  "i128": "300000000"
                                 }
                               },
                               {
@@ -438,7 +465,7 @@
                                   "symbol": "amount"
                                 },
                                 "val": {
-                                  "i128": "700"
+                                  "i128": "700000000"
                                 }
                               },
                               {
@@ -482,12 +509,24 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "TotalDonorCount"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "2"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "TotalRaised"
                           }
                         ]
                       },
                       "val": {
-                        "i128": "1000"
+                        "i128": "1000000000"
                       }
                     },
                     {
@@ -499,7 +538,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "300"
+                        "i128": "300000000"
                       }
                     },
                     {
@@ -511,7 +550,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "1000"
+                        "i128": "1000000000"
                       }
                     }
                   ]

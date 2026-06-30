@@ -80,7 +80,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "vote_reject",
+              "function_name": "vote_approve",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -102,7 +102,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "vote_reject",
+              "function_name": "vote_approve",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -118,13 +118,12 @@
       ]
     ],
     [],
-    [],
     []
   ],
   "ledger": {
     "protocol_version": 26,
     "sequence_number": 0,
-    "timestamp": 605801,
+    "timestamp": 1000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 0,
@@ -195,7 +194,7 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "VoteRejections"
+                    "symbol": "VoteApprovals"
                   },
                   {
                     "u32": 0
@@ -424,7 +423,7 @@
                                 "val": {
                                   "vec": [
                                     {
-                                      "symbol": "Rejected"
+                                      "symbol": "Approved"
                                     }
                                   ]
                                 }
@@ -511,7 +510,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "0"
+                        "i128": "300000000"
                       }
                     },
                     {
