@@ -1320,6 +1320,15 @@ function App() {
                                 Release
                               </button>
                             )}
+                            {st === 1 && hasVoted && quorumPct >= 51 && supermajorityPct >= 66 && (
+                              <button
+                                onClick={() => releaseMilestone(selectedCampaign.address, i)}
+                                disabled={isSending}
+                                className="text-[10px] px-2 py-1 rounded bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors disabled:opacity-50"
+                              >
+                                Release
+                              </button>
+                            )}
                             {st === 2 && (
                               <button
                                 onClick={() => mintNfts(selectedCampaign.address, i)}
