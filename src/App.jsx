@@ -1191,6 +1191,15 @@ function App() {
                 </div>
               </div>
 
+              {selectedCampaign.admin && (
+                <div className="mb-4">
+                  <div className="text-xs text-slate-500 mb-1">Campaign Creator</div>
+                  <div className="text-xs font-mono text-slate-400 break-all">
+                    {selectedCampaign.admin}
+                  </div>
+                </div>
+              )}
+
               <CampaignCard
                 campaigns={[selectedCampaign]}
                 compact
