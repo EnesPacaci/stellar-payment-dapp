@@ -5,10 +5,9 @@ import { SOROBAN_RPC_URL, HORIZON_URL } from './config'
 const HORIZON_SERVER = new (await import('@stellar/stellar-sdk')).Horizon.Server(HORIZON_URL)
 const SOROBAN_SERVER = new rpc.Server(SOROBAN_RPC_URL)
 
-export async function submitOnChainFeedback(campaignAddress, rating, comment) {
-  if (!campaignAddress) throw new Error('No campaign selected')
-  const publicKey = StellarWalletsKit.getWalletData().address
+export async function submitOnChainFeedback(publicKey, campaignAddress, rating, comment) {
   if (!publicKey) throw new Error('No wallet connected')
+  if (!campaignAddress) throw new Error('No campaign selected')
 
   const campaignContract = new Contract(campaignAddress)
   const account = await HORIZON_SERVER.loadAccount(publicKey)
@@ -29,7 +28,7 @@ export async function submitOnChainFeedback(campaignAddress, rating, comment) {
     .build()
 
   const simResult = await SOROBAN_SERVER.simulateTransaction(tx)
-  if (simResult.error) throw simResult.error
+  if (simResult.error) throw new Error(simResult.error?.message || simResult.error || 'Simulation failed')
 
   const assembledTx = rpc.assembleTransaction(tx, simResult).build()
   const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {

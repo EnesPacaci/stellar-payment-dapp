@@ -10,18 +10,19 @@ export default function FeedbackForm({ onClose, onSubmit }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const setStatus = useStore((s) => s.setStatus)
   const selectedCampaign = useStore((s) => s.selectedCampaign)
+  const publicKey = useStore((s) => s.publicKey)
 
   const handleSubmit = async () => {
-    if (rating === 0 || isSubmitting) return
+    if (rating === 0 || isSubmitting || !publicKey) return
     setIsSubmitting(true)
     try {
-      await submitOnChainFeedback(selectedCampaign?.address, rating, comment)
+      await submitOnChainFeedback(publicKey, selectedCampaign?.address, rating, comment)
       setSubmitted(true)
       onSubmit()
       setStatus('Thank you for your on-chain feedback!')
     } catch (err) {
       console.error('Feedback error:', err)
-      setStatus('Feedback failed: ' + (err?.message || 'Unknown error'))
+      setStatus('Feedback failed: ' + (err?.message || String(err) || 'Unknown error'))
       setIsSubmitting(false)
     }
   }

@@ -345,7 +345,7 @@ impl Campaign {
         let feedback = Feedback {
             user: user.clone(),
             rating,
-            comment,
+            comment: comment.clone(),
             timestamp: env.ledger().timestamp(),
         };
         env.storage().instance().set(&DataKey::Feedback(count), &feedback);

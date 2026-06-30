@@ -39,7 +39,7 @@ describe('FeedbackForm', () => {
   })
 
   it('shows submitted state after submit', async () => {
-    useStore.setState({ setStatus: () => {}, selectedCampaign: { address: 'test' } })
+    useStore.setState({ setStatus: () => {}, selectedCampaign: { address: 'test' }, publicKey: 'GABC...' })
     render(<FeedbackForm onClose={() => {}} onSubmit={() => {}} />)
     const stars = screen.getAllByText('★')
     fireEvent.click(stars[3])
