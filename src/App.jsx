@@ -1135,8 +1135,20 @@ function App() {
             <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700">
               <div className="mb-4">
                 <div className="text-xs text-slate-500 mb-1">Campaign Address</div>
-                <div className="text-xs font-mono text-slate-400 break-all">
-                  {selectedCampaign.address}
+                <div className="flex items-center gap-2">
+                  <div className="text-xs font-mono text-slate-400 break-all flex-1">
+                    {selectedCampaign.address}
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedCampaign.address)
+                      setStatus('Address copied!')
+                      setTimeout(() => setStatus(''), 2000)
+                    }}
+                    className="text-[10px] text-cyan-400 border border-slate-600 px-2 py-1 rounded hover:bg-slate-700 transition-colors shrink-0"
+                  >
+                    Copy
+                  </button>
                 </div>
               </div>
 
@@ -1147,7 +1159,26 @@ function App() {
 
               {selectedCampaign.milestones && selectedCampaign.milestones.length > 0 && (
                 <div className="mt-6 mb-4">
-                  <div className="text-xs text-slate-500 mb-3">Milestones</div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs text-slate-500">Milestones</div>
+                    <div className="flex gap-2 text-[10px]">
+                      {selectedCampaign.milestones.filter(m => parseMilestoneStatus(m.status) === 2).length > 0 && (
+                        <span className="text-green-400">
+                          {selectedCampaign.milestones.filter(m => parseMilestoneStatus(m.status) === 2).length} Approved
+                        </span>
+                      )}
+                      {selectedCampaign.milestones.filter(m => parseMilestoneStatus(m.status) === 1).length > 0 && (
+                        <span className="text-yellow-400">
+                          {selectedCampaign.milestones.filter(m => parseMilestoneStatus(m.status) === 1).length} Active
+                        </span>
+                      )}
+                      {selectedCampaign.milestones.filter(m => parseMilestoneStatus(m.status) === 3).length > 0 && (
+                        <span className="text-red-400">
+                          {selectedCampaign.milestones.filter(m => parseMilestoneStatus(m.status) === 3).length} Rejected
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   <div className="space-y-3">
                     {selectedCampaign.milestones.map((ms, i) => {
                       const msXLM = (Number(ms.amount) / 10_000_000).toFixed(0)
