@@ -1368,6 +1368,16 @@ function App() {
           </>
         )}
       </main>
+
+      <footer className="max-w-2xl mx-auto px-4 sm:px-5 py-8 mt-12 border-t border-slate-800">
+        <div className="text-center">
+          <div className="text-xs text-slate-500 mb-2">Stellar Crowdfund — Donor-Protected Escrow on Stellar Testnet</div>
+          <div className="text-[10px] text-slate-600 font-mono space-y-0.5">
+            <div>Factory: {CONTRACT_ADDRESSES.factory.slice(0, 8)}...{CONTRACT_ADDRESSES.factory.slice(-6)}</div>
+            <div>RewardNFT: {CONTRACT_ADDRESSES.rewardNft.slice(0, 8)}...{CONTRACT_ADDRESSES.rewardNft.slice(-6)}</div>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
