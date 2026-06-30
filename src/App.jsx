@@ -87,6 +87,9 @@ function App() {
     feedbackSubmitted, setFeedbackSubmitted,
   } = useStore()
 
+  const campaignSearch = useStore((s) => s.campaignSearch)
+  const setCampaignSearch = useStore((s) => s.setCampaignSearch)
+
   const fireConfetti = () => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -1045,6 +1048,7 @@ function App() {
                   setDonationCount(0)
                   setTxHash('')
                   setStatus('')
+                  setCampaignSearch('')
                 }}
                 className="text-xs text-slate-300 border border-slate-600 px-3 py-1.5 rounded-md hover:bg-slate-700 transition-colors"
               >
@@ -1101,6 +1105,17 @@ function App() {
 
         {!showCreateForm && !selectedCampaign && (
           <>
+            {campaigns.length > 0 && (
+              <div className="mb-4">
+                <input
+                  type="text"
+                  placeholder="Search campaigns..."
+                  value={campaignSearch}
+                  onChange={(e) => setCampaignSearch(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-white text-xs outline-none transition-colors focus:border-cyan-400"
+                />
+              </div>
+            )}
             {useStore.getState().isLoadingCampaigns ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => (
@@ -1119,7 +1134,12 @@ function App() {
               </div>
             ) : (
               <CampaignCard
-                campaigns={campaigns}
+                campaigns={campaigns.filter(c => {
+                  if (!campaignSearch) return true
+                  const q = campaignSearch.toLowerCase()
+                  return (c.name || '').toLowerCase().includes(q) ||
+                         (c.address || '').toLowerCase().includes(q)
+                })}
                 onSelect={(c) => {
                   if (c.name === 'Loading...') return
                   setSelectedCampaign(c)

@@ -21,6 +21,7 @@ const useStore = create((set) => ({
   nftTokens: [],
   showFeedbackForm: false,
   feedbackSubmitted: false,
+  campaignSearch: '',
 
   setPublicKey: (publicKey) => set({ publicKey }),
   setBalance: (balance) => set({ balance }),
@@ -42,6 +43,7 @@ const useStore = create((set) => ({
   setNftTokens: (nftTokens) => set({ nftTokens }),
   setShowFeedbackForm: (showFeedbackForm) => set({ showFeedbackForm }),
   setFeedbackSubmitted: (feedbackSubmitted) => set({ feedbackSubmitted }),
+  setCampaignSearch: (campaignSearch) => set({ campaignSearch }),
   resetWallet: () => set({ publicKey: null, balance: null, walletName: '', amount: '', selectedCampaign: null }),
   resetTx: () => set({ status: '', txHash: '' }),
 }))
