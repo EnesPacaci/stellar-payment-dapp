@@ -6,7 +6,7 @@ import useStore from '../store'
 describe('Header', () => {
   it('renders connect button when not connected', () => {
     useStore.setState({ publicKey: null, balance: null, walletName: '' })
-    render(<Header onConnect={() => {}} onDisconnect={() => {}} />)
+    render(<Header onConnect={() => {}} onDisconnect={() => {}} onShowNft={() => {}} />)
     expect(screen.getByText('Connect Wallet')).toBeInTheDocument()
     expect(screen.getByText('Stellar Crowdfund')).toBeInTheDocument()
   })
@@ -17,9 +17,19 @@ describe('Header', () => {
       balance: '100.0000000',
       walletName: 'Freighter',
     })
-    render(<Header onConnect={() => {}} onDisconnect={() => {}} />)
+    render(<Header onConnect={() => {}} onDisconnect={() => {}} onShowNft={() => {}} />)
     expect(screen.getByText('Disconnect')).toBeInTheDocument()
     expect(screen.getByText(/XLM/)).toBeInTheDocument()
     expect(screen.getByText('Freighter')).toBeInTheDocument()
+  })
+
+  it('renders NFTs button when connected', () => {
+    useStore.setState({
+      publicKey: 'GDGGSUZ42XTYN5MLZGLNNUGO446SVL6XVZQQSPTSCEM2PCHCRZCW3X3C',
+      balance: '100.0000000',
+      walletName: 'Freighter',
+    })
+    render(<Header onConnect={() => {}} onDisconnect={() => {}} onShowNft={() => {}} />)
+    expect(screen.getByText('NFTs')).toBeInTheDocument()
   })
 })
