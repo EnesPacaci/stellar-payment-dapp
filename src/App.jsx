@@ -970,108 +970,84 @@ function App() {
     }
   }
 
-  const initNft = async () => {
-    if (!publicKey) return
-    setIsSending(true)
-    setStatus('Initializing NFT contract with your wallet as admin...')
-    setTxHash('')
-    try {
-      const account = await HORIZON_SERVER.loadAccount(publicKey)
-      const nftContract = new Contract(CONTRACT_ADDRESSES.rewardNft)
-
-      const tx = new TransactionBuilder(account, {
-        fee: await HORIZON_SERVER.fetchBaseFee(),
-        networkPassphrase: Networks.TESTNET,
-      })
-        .addOperation(
-          nftContract.call(
-            'init',
-            nativeToScVal(new Address(publicKey), { type: 'address' })
-          )
-        )
-        .setTimeout(60)
-        .build()
-
-      setStatus('Simulating transaction...')
-      const simResult = await SOROBAN_SERVER.simulateTransaction(tx)
-      if (simResult.error) throw simResult.error
-      const assembledTx = rpc.assembleTransaction(tx, simResult).build()
-
-      setStatus('Waiting for wallet signature...')
-      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
-        networkPassphrase: Networks.TESTNET,
-      })
-
-      setStatus('Submitting to network...')
-      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
-      const result = await HORIZON_SERVER.submitTransaction(signedTx)
-      setStatus('NFT contract initialized! You are now the admin.')
-      setTxHash(result.hash)
-    } catch (error) {
-      console.error('Init NFT failed', error)
-      setStatus(parseContractError(error, 'init'))
-    } finally {
-      setIsSending(false)
-    }
-  }
-
   const mintNfts = async (campaignAddr, milestoneIndex) => {
     if (!publicKey) return
     setIsSending(true)
-    setStatus('Minting NFTs for voters...')
+    setStatus('Fetching approved voters from contract...')
     setTxHash('')
     try {
-      const voterKey = `crowdfund_voters_${campaignAddr}_${milestoneIndex}`
-      const voters = JSON.parse(localStorage.getItem(voterKey) || '[]')
-      const approvedVoters = voters.filter(v => v.approve)
-      if (approvedVoters.length === 0) {
+      // Get approved voters from campaign contract (not localStorage)
+      const approvedVoters = await invokeCampaignRead(campaignAddr, 'get_approved_voters', nativeToScVal(milestoneIndex, { type: 'u32' }))
+      if (!approvedVoters || approvedVoters.length === 0) {
         setStatus('No approved voters found for this milestone.')
         setIsSending(false)
         return
       }
 
-      const account = await HORIZON_SERVER.loadAccount(publicKey)
+      // Get donor totals for each approved voter to mint correct amounts
+      const voterAmounts = await Promise.all(
+        approvedVoters.map(async (voter) => {
+          const total = await invokeCampaignRead(campaignAddr, 'get_donor_total', nativeToScVal(new Address(voter), { type: 'address' }))
+          return { address: voter, amount: Number(total || 0) }
+        })
+      )
+
       const nftContract = new Contract(CONTRACT_ADDRESSES.rewardNft)
+      let successCount = 0
+      let lastTxHash = ''
 
-      const tx = new TransactionBuilder(account, {
-        fee: await HORIZON_SERVER.fetchBaseFee(),
-        networkPassphrase: Networks.TESTNET,
-      })
+      // Send each mint as separate transaction (Frequently wallet limitation)
+      for (const voter of voterAmounts) {
+        try {
+          const account = await HORIZON_SERVER.loadAccount(publicKey)
+          const voterAmount = BigInt(voter.amount)
 
-      for (const voter of approvedVoters) {
-        const voterAmount = BigInt(voter.amount || '0')
-        tx.addOperation(
-          nftContract.call(
-            'mint',
-            nativeToScVal(new Address(publicKey), { type: 'address' }),
-            nativeToScVal(new Address(voter.address), { type: 'address' }),
-            nativeToScVal(new Address(campaignAddr), { type: 'address' }),
-            nativeToScVal(milestoneIndex, { type: 'u32' }),
-            nativeToScVal(voterAmount, { type: 'i128' })
-          )
-        )
+          const tx = new TransactionBuilder(account, {
+            fee: await HORIZON_SERVER.fetchBaseFee(),
+            networkPassphrase: Networks.TESTNET,
+          })
+            .addOperation(
+              nftContract.call(
+                'mint',
+                nativeToScVal(new Address(publicKey), { type: 'address' }),
+                nativeToScVal(new Address(voter.address), { type: 'address' }),
+                nativeToScVal(new Address(campaignAddr), { type: 'address' }),
+                nativeToScVal(milestoneIndex, { type: 'u32' }),
+                nativeToScVal(voterAmount, { type: 'i128' })
+              )
+            )
+            .setTimeout(60)
+            .build()
+
+          setStatus(`Minting NFT ${successCount + 1}/${voterAmounts.length}...`)
+          const simResult = await SOROBAN_SERVER.simulateTransaction(tx)
+          if (simResult.error) {
+            console.error(`Simulate failed for ${voter.address}:`, simResult.error)
+            continue
+          }
+          const assembledTx = rpc.assembleTransaction(tx, simResult).build()
+
+          const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+            networkPassphrase: Networks.TESTNET,
+          })
+
+          const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+          const result = await HORIZON_SERVER.submitTransaction(signedTx)
+          lastTxHash = result.hash
+          successCount++
+        } catch (err) {
+          console.error(`Mint failed for ${voter.address}:`, err)
+        }
       }
 
-      const transaction = tx.setTimeout(60).build()
-
-      setStatus('Simulating transaction...')
-      const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
-      if (simResult.error) throw simResult.error
-      const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
-
-      setStatus('Waiting for wallet signature...')
-      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
-        networkPassphrase: Networks.TESTNET,
-      })
-
-      setStatus('Submitting to network...')
-      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
-      const result = await HORIZON_SERVER.submitTransaction(signedTx)
-      setStatus(`${approvedVoters.length} NFT(s) minted successfully!`)
-      setTxHash(result.hash)
-      fireConfetti()
-
-      await fetchNftTokens()
+      if (successCount > 0) {
+        setStatus(`${successCount}/${voterAmounts.length} NFT(s) minted successfully!`)
+        setTxHash(lastTxHash)
+        fireConfetti()
+        await fetchNftTokens()
+      } else {
+        setStatus('All NFT mint transactions failed. Check wallet connection.')
+      }
     } catch (error) {
       console.error('Mint NFTs failed', error)
       setStatus(parseContractError(error, 'mint'))
@@ -1299,18 +1275,6 @@ function App() {
                 </div>
               )}
 
-              {publicKey && selectedCampaign.admin === publicKey && (
-                <div className="mb-4">
-                  <button
-                    onClick={initNft}
-                    disabled={isSending}
-                    className="text-xs px-3 py-1.5 rounded bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-50"
-                  >
-                    Initialize NFT Contract (Required before minting)
-                  </button>
-                </div>
-              )}
-
               <CampaignCard
                 campaigns={[selectedCampaign]}
                 compact
@@ -1474,14 +1438,10 @@ function App() {
                                 Release
                               </button>
                             )}
-                            {st === 2 && publicKey && selectedCampaign.admin === publicKey && (
-                              <button
-                                onClick={() => mintNfts(selectedCampaign.address, i)}
-                                disabled={isSending}
-                                className="text-[10px] px-2 py-1 rounded bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-50"
-                              >
-                                Mint NFTs
-                              </button>
+                            {st === 2 && (
+                              <span className="text-[10px] text-purple-400">
+                                NFTs auto-distributed
+                              </span>
                             )}
                             {st === 3 && !refundClaimed && (
                               <button
