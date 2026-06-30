@@ -127,6 +127,12 @@ impl Factory {
     pub fn get_nft_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::NftContract)
     }
+
+    pub fn set_campaign_wasm(env: Env, campaign_wasm: BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::CampaignWasm, &campaign_wasm);
+    }
 }
 
 #[cfg(test)]

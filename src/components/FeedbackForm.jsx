@@ -1,23 +1,29 @@
 import { useState } from 'react'
 import useStore from '../store'
+import { submitOnChainFeedback } from '../feedback'
 
 export default function FeedbackForm({ onClose, onSubmit }) {
   const [rating, setRating] = useState(0)
   const [comment, setComment] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [hover, setHover] = useState(0)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const setStatus = useStore((s) => s.setStatus)
+  const selectedCampaign = useStore((s) => s.selectedCampaign)
 
-  const handleSubmit = () => {
-    if (rating === 0) return
-    const feedback = { rating, comment, timestamp: new Date().toISOString() }
-    const stored = localStorage.getItem('crowdfund_feedback')
-    const list = stored ? JSON.parse(stored) : []
-    list.unshift(feedback)
-    localStorage.setItem('crowdfund_feedback', JSON.stringify(list))
-    setSubmitted(true)
-    onSubmit()
-    setStatus('Thank you for your feedback!')
+  const handleSubmit = async () => {
+    if (rating === 0 || isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      await submitOnChainFeedback(selectedCampaign?.address, rating, comment)
+      setSubmitted(true)
+      onSubmit()
+      setStatus('Thank you for your on-chain feedback!')
+    } catch (err) {
+      console.error('Feedback error:', err)
+      setStatus('Feedback failed: ' + (err?.message || 'Unknown error'))
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -25,7 +31,7 @@ export default function FeedbackForm({ onClose, onSubmit }) {
       <div className="bg-slate-800 rounded-xl p-6 shadow-xl border border-slate-700 max-w-sm w-full">
         {submitted ? (
           <div className="text-center">
-            <div className="text-lg text-green-400 mb-2">Feedback submitted!</div>
+            <div className="text-lg text-green-400 mb-2">Feedback submitted on-chain!</div>
             <button
               onClick={onClose}
               className="text-xs text-slate-400 border border-slate-600 px-3 py-1.5 rounded-md hover:bg-slate-700 transition-colors"
@@ -67,10 +73,10 @@ export default function FeedbackForm({ onClose, onSubmit }) {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={rating === 0}
+                disabled={rating === 0 || isSubmitting}
                 className="text-xs bg-cyan-400 text-slate-900 px-3 py-1.5 rounded-md font-semibold hover:bg-cyan-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Submit
+                {isSubmitting ? 'Submitting...' : 'Submit'}
               </button>
             </div>
           </>

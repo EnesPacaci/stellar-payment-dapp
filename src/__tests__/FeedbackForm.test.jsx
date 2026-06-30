@@ -1,11 +1,15 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import FeedbackForm from '../components/FeedbackForm'
 import useStore from '../store'
 
+vi.mock('../feedback', () => ({
+  submitOnChainFeedback: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe('FeedbackForm', () => {
   it('renders feedback form with stars', () => {
-    useStore.setState({ setStatus: () => {} })
+    useStore.setState({ setStatus: () => {}, selectedCampaign: { address: 'test' } })
     render(<FeedbackForm onClose={() => {}} onSubmit={() => {}} />)
     expect(screen.getByText('How was your experience?')).toBeInTheDocument()
     expect(screen.getByText('Skip')).toBeInTheDocument()
@@ -13,13 +17,13 @@ describe('FeedbackForm', () => {
   })
 
   it('submit button is disabled when no rating selected', () => {
-    useStore.setState({ setStatus: () => {} })
+    useStore.setState({ setStatus: () => {}, selectedCampaign: { address: 'test' } })
     render(<FeedbackForm onClose={() => {}} onSubmit={() => {}} />)
     expect(screen.getByText('Submit')).toBeDisabled()
   })
 
   it('submit button enabled after star selection', () => {
-    useStore.setState({ setStatus: () => {} })
+    useStore.setState({ setStatus: () => {}, selectedCampaign: { address: 'test' } })
     render(<FeedbackForm onClose={() => {}} onSubmit={() => {}} />)
     const stars = screen.getAllByText('★')
     fireEvent.click(stars[2])
@@ -28,18 +32,20 @@ describe('FeedbackForm', () => {
 
   it('calls onClose when Skip is clicked', () => {
     const handleClose = vi.fn()
-    useStore.setState({ setStatus: () => {} })
+    useStore.setState({ setStatus: () => {}, selectedCampaign: { address: 'test' } })
     render(<FeedbackForm onClose={handleClose} onSubmit={() => {}} />)
     fireEvent.click(screen.getByText('Skip'))
     expect(handleClose).toHaveBeenCalled()
   })
 
-  it('shows submitted state after submit', () => {
-    useStore.setState({ setStatus: () => {} })
+  it('shows submitted state after submit', async () => {
+    useStore.setState({ setStatus: () => {}, selectedCampaign: { address: 'test' } })
     render(<FeedbackForm onClose={() => {}} onSubmit={() => {}} />)
     const stars = screen.getAllByText('★')
     fireEvent.click(stars[3])
     fireEvent.click(screen.getByText('Submit'))
-    expect(screen.getByText('Feedback submitted!')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Feedback submitted on-chain!')).toBeInTheDocument()
+    })
   })
 })

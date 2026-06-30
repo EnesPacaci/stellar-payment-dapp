@@ -44,6 +44,17 @@ pub enum DataKey {
     VotingDeadline(u32),
     RefundClaimed(u32, Address),
     NftContract,
+    FeedbackCount,
+    Feedback(u32),
+    HasFeedback(Address),
+}
+
+#[contracttype]
+pub struct Feedback {
+    pub user: Address,
+    pub rating: u32,
+    pub comment: String,
+    pub timestamp: u64,
 }
 
 #[contract]
@@ -321,6 +332,38 @@ impl Campaign {
 
     pub fn get_refund_claimed(env: Env, donor: Address, index: u32) -> bool {
         env.storage().persistent().get(&DataKey::RefundClaimed(index, donor)).unwrap_or(false)
+    }
+
+    pub fn submit_feedback(env: Env, user: Address, rating: u32, comment: String) {
+        user.require_auth();
+        assert!(rating >= 1 && rating <= 5, "rating must be 1-5");
+
+        let has_feedback: bool = env.storage().persistent().get(&DataKey::HasFeedback(user.clone())).unwrap_or(false);
+        assert!(!has_feedback, "already submitted feedback");
+
+        let count: u32 = env.storage().instance().get(&DataKey::FeedbackCount).unwrap_or(0);
+        let feedback = Feedback {
+            user: user.clone(),
+            rating,
+            comment,
+            timestamp: env.ledger().timestamp(),
+        };
+        env.storage().instance().set(&DataKey::Feedback(count), &feedback);
+        env.storage().instance().set(&DataKey::FeedbackCount, &(count + 1));
+        env.storage().persistent().set(&DataKey::HasFeedback(user.clone()), &true);
+
+        env.events().publish(
+            (symbol_short!("feedback"),),
+            (user, rating, env.ledger().timestamp(), comment),
+        );
+    }
+
+    pub fn get_feedback_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::FeedbackCount).unwrap_or(0)
+    }
+
+    pub fn get_feedback(env: Env, index: u32) -> Feedback {
+        env.storage().instance().get(&DataKey::Feedback(index)).unwrap()
     }
 }
 
@@ -868,5 +911,72 @@ mod tests {
         // Same donor donates again, count should not increase
         client.donate(&donor1, &200_000_000);
         assert_eq!(client.get_total_donor_count(), 2);
+    }
+
+    #[test]
+    fn test_submit_feedback() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        init_campaign(&env, &client, &admin);
+
+        env.mock_all_auths();
+        client.submit_feedback(&user, &5, &String::from_str(&env, "Great project!"));
+
+        assert_eq!(client.get_feedback_count(), 1);
+        let fb = client.get_feedback(&0);
+        assert_eq!(fb.user, user);
+        assert_eq!(fb.rating, 5);
+        assert_eq!(fb.comment, String::from_str(&env, "Great project!"));
+    }
+
+    #[test]
+    fn test_submit_feedback_invalid_rating() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        init_campaign(&env, &client, &admin);
+
+        env.mock_all_auths();
+        let result = client.try_submit_feedback(&user, &0, &String::from_str(&env, "Bad"));
+        assert!(result.is_err());
+
+        let result = client.try_submit_feedback(&user, &6, &String::from_str(&env, "Bad"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_submit_feedback_duplicate() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        init_campaign(&env, &client, &admin);
+
+        env.mock_all_auths();
+        client.submit_feedback(&user, &4, &String::from_str(&env, "Good"));
+
+        let result = client.try_submit_feedback(&user, &5, &String::from_str(&env, "Still good"));
+        assert!(result.is_err());
+        assert_eq!(client.get_feedback_count(), 1);
+    }
+
+    #[test]
+    fn test_multiple_feedback_users() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+        let user3 = Address::generate(&env);
+        init_campaign(&env, &client, &admin);
+
+        env.mock_all_auths();
+        client.submit_feedback(&user1, &5, &String::from_str(&env, "Excellent"));
+        client.submit_feedback(&user2, &4, &String::from_str(&env, "Very good"));
+        client.submit_feedback(&user3, &3, &String::from_str(&env, "Average"));
+
+        assert_eq!(client.get_feedback_count(), 3);
+        assert_eq!(client.get_feedback(&0).user, user1);
+        assert_eq!(client.get_feedback(&1).user, user2);
+        assert_eq!(client.get_feedback(&2).user, user3);
     }
 }

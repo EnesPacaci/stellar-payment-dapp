@@ -13,6 +13,7 @@
     "@creit.tech/stellar-wallets-kit": "^2.4.0",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^16.0.1",
+    "@vercel/analytics": "^2.0.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zustand": "^5.0.14"

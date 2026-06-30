@@ -13,6 +13,7 @@ import Header from './components/Header'
 import CampaignCard from './components/CampaignCard'
 import DonateForm from './components/DonateForm'
 import RecentDonations from './components/RecentDonations'
+import RecentFeedback from './components/RecentFeedback'
 import CreateCampaign from './components/CreateCampaign'
 import FeedbackForm from './components/FeedbackForm'
 import NftModal from './components/NftModal'
@@ -1569,6 +1570,9 @@ function App() {
 
             <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700 mt-5">
               <RecentDonations />
+            </div>
+            <div className="bg-slate-800 rounded-xl p-8 shadow-lg border border-slate-700 mt-5">
+              <RecentFeedback />
             </div>
           </>
         )}
