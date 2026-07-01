@@ -1,7 +1,6 @@
 import { rpc, scValToNative } from '@stellar/stellar-sdk'
 
-const FACTORY_ID = 'CC746HDMG7BQ4IBL3324VIUYIHKP5LITPABDNAK4JH222OMRINVTXJ54'
-const CAMPAIGN_ID = 'CAEE5ZFKO75ZP6H7TZQXUG7MTNM7PJ6HYDOONLT4SC3K4NFMF646ZMEI'
+const FACTORY_ID = 'CDXVHHKWEA7VA62KZKMTUCLQC6XR3URCZBA7QGPAFE6PP4AY2NG675TM'
 const RPC_URL = 'https://soroban-testnet.stellar.org'
 
 const SOROBAN = new rpc.Server(RPC_URL)
@@ -15,28 +14,49 @@ export default async function handler(req, res) {
 
     const latestLedgerInfo = await SOROBAN.getLatestLedger()
     const latestLedger = latestLedgerInfo?.sequence || 0
-    const startLedger = Math.max(latestLedger - 5000, 1)
+    const startLedger = Math.max(latestLedger - 100000, 1)
 
-    const eventsResult = await SOROBAN.getEvents({
-      startLedger,
-      filters: [{ type: 'contract', contractIds: [CAMPAIGN_ID] }],
-      pagination: { limit: 200 },
-    }).catch(() => ({ events: [] }))
-    const events = eventsResult?.events || []
+    const campaignsResult = await SOROBAN.simulateContract({
+      contractId: FACTORY_ID,
+      method: 'get_campaigns',
+      args: [],
+    }).catch(() => null)
+
+    let campaignAddresses = []
+    if (campaignsResult?.result?.retval) {
+      try {
+        const native = scValToNative(campaignsResult.result.retval)
+        if (Array.isArray(native)) {
+          campaignAddresses = native.map(a => a.toString())
+        }
+      } catch {}
+    }
+
     let donations = 0, feedbacks = 0, votes = 0
     const uniqueDonors = new Set()
 
-    for (const e of events) {
+    for (const campaignAddr of campaignAddresses) {
       try {
-        const sym = scValToNative(e.topic[0])
-        if (sym === 'donate') {
-          donations++
-          const data = scValToNative(e.value)
-          if (data?.[0]) uniqueDonors.add(data[0].toString())
-        } else if (sym === 'feedback') {
-          feedbacks++
-        } else if (sym === 'vote_a' || sym === 'vote_r') {
-          votes++
+        const eventsResult = await SOROBAN.getEvents({
+          startLedger,
+          filters: [{ type: 'contract', contractIds: [campaignAddr] }],
+          pagination: { limit: 200 },
+        }).catch(() => ({ events: [] }))
+        const events = eventsResult?.events || []
+
+        for (const e of events) {
+          try {
+            const sym = scValToNative(e.topic[0])
+            if (sym === 'donate') {
+              donations++
+              const data = scValToNative(e.value)
+              if (data?.[0]) uniqueDonors.add(data[0].toString())
+            } else if (sym === 'feedback') {
+              feedbacks++
+            } else if (sym === 'vote_a' || sym === 'vote_r') {
+              votes++
+            }
+          } catch {}
         }
       } catch {}
     }
@@ -51,14 +71,13 @@ export default async function handler(req, res) {
       rpcLatestLedger: latestLedger,
       contracts: {
         factory: FACTORY_ID,
-        campaign: CAMPAIGN_ID,
+        totalCampaigns: campaignAddresses.length,
       },
       stats: {
         totalDonations: donations,
         totalFeedback: feedbacks,
         totalVotes: votes,
         uniqueDonors: uniqueDonors.size,
-        totalEvents: events.length,
       },
     })
   } catch (err) {
@@ -68,7 +87,6 @@ export default async function handler(req, res) {
       error: err.message,
       contracts: {
         factory: FACTORY_ID,
-        campaign: CAMPAIGN_ID,
       },
     })
   }
