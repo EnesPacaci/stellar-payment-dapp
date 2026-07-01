@@ -5,6 +5,7 @@ import useStore from '../store'
 
 vi.mock('../feedback', () => ({
   submitOnChainFeedback: vi.fn().mockResolvedValue(undefined),
+  fetchOnChainFeedback: vi.fn().mockResolvedValue([]),
 }))
 
 describe('FeedbackForm', () => {
