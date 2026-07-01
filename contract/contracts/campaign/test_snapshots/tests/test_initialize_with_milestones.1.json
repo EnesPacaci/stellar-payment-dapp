@@ -181,6 +181,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "TokenAddress"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "address": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "TotalDonorCount"
                           }
                         ]

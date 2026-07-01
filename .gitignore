@@ -29,3 +29,5 @@ contract/contracts/*/target/
 contract/test_snapshots/
 
 .vercel
+
+scripts/

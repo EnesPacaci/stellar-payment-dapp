@@ -44,6 +44,7 @@ function parseMilestoneStatus(status) {
 function parseContractError(error, context) {
   const msg = error?.message || String(error) || ''
   if (msg.includes('rejected') || msg.includes('User rejected')) return 'Transaction rejected by user.'
+  if (msg.includes('insufficient released funds')) return 'Not enough released funds to withdraw. Release milestones first.'
   if (msg.includes('insufficient') || msg.includes('underfunded') || msg.includes('Insufficient')) return 'Insufficient balance for this action.'
   if (msg.includes('account') && msg.includes('not found')) return 'Account not found on testnet. Get XLM from friendbot first.'
   if (msg.includes('MissingValue') || msg.includes('non-existing value')) return 'Campaign data not found on-chain.'
@@ -247,13 +248,14 @@ function App() {
 
   const fetchSingleCampaign = useCallback(async (addr) => {
     try {
-      const [info, name, rawMilestones, totalReleased, voteData, admin] = await Promise.all([
+      const [info, name, rawMilestones, totalReleased, voteData, admin, totalWithdrawn] = await Promise.all([
         invokeCampaignRead(addr, 'get_info'),
         invokeCampaignRead(addr, 'get_name'),
         invokeCampaignRead(addr, 'get_milestones'),
         invokeCampaignRead(addr, 'get_total_released'),
         fetchVoteStatus(addr),
         invokeCampaignRead(addr, 'get_admin'),
+        invokeCampaignRead(addr, 'get_total_withdrawn'),
       ])
       if (!info) return null
       const [goal, raised, deadline] = info
@@ -282,6 +284,7 @@ function App() {
         deadline: Number(deadline),
         milestones,
         totalReleased: String(totalReleased || '0'),
+        totalWithdrawn: String(totalWithdrawn || '0'),
         donorTotal: voteData?.donorTotal || '0',
         totalVoterWeight: voteData?.totalVoterWeight || '0',
         totalDonorCount: voteData?.totalDonorCount || '0',
@@ -492,16 +495,15 @@ function App() {
   }, [selectedCampaign])
 
   useEffect(() => {
+    if (selectedCampaign) return
     let timeout
     const poll = async () => {
-      if (!isSending) {
-        await fetchCampaigns()
-      }
+      await fetchCampaigns()
       timeout = setTimeout(poll, 15000)
     }
     timeout = setTimeout(poll, 15000)
     return () => clearTimeout(timeout)
-  }, [isSending, fetchCampaigns])
+  }, [selectedCampaign, fetchCampaigns])
 
   useEffect(() => {
     if (!selectedCampaign) return
@@ -767,39 +769,42 @@ function App() {
     setIsSending(true)
     setStatus('Submitting milestone...')
     setTxHash('')
-    try {
-      const account = await HORIZON_SERVER.loadAccount(publicKey)
-      const campaignContract = new Contract(campaignAddr)
-      const transaction = new TransactionBuilder(account, {
-        fee: await HORIZON_SERVER.fetchBaseFee(),
-        networkPassphrase: Networks.TESTNET,
-      })
-        .addOperation(
-          campaignContract.call(
-            'submit_milestone',
-            nativeToScVal(new Address(publicKey), { type: 'address' }),
-            nativeToScVal(index, { type: 'u32' })
+
+    const maxRetries = 3
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const account = await HORIZON_SERVER.loadAccount(publicKey)
+        const campaignContract = new Contract(campaignAddr)
+        const transaction = new TransactionBuilder(account, {
+          fee: await HORIZON_SERVER.fetchBaseFee(),
+          networkPassphrase: Networks.TESTNET,
+        })
+          .addOperation(
+            campaignContract.call(
+              'submit_milestone',
+              new Address(publicKey).toScVal(),
+              nativeToScVal(index, { type: 'u32' })
+            )
           )
-        )
-        .setTimeout(60)
-        .build()
+          .setTimeout(60)
+          .build()
 
-      setStatus('Simulating transaction...')
-      const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
-      if (simResult.error) throw simResult.error
-      const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
+        setStatus('Simulating transaction...')
+        const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
+        if (simResult.error) throw simResult.error
+        const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
 
-      setStatus('Waiting for wallet signature...')
-      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
-        networkPassphrase: Networks.TESTNET,
-      })
+        setStatus('Waiting for wallet signature...')
+        const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+          networkPassphrase: Networks.TESTNET,
+        })
 
-      setStatus('Submitting to network...')
-      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
-      const result = await HORIZON_SERVER.submitTransaction(signedTx)
-      setStatus('Milestone submitted successfully!')
-      setTxHash(result.hash)
-      fireConfetti()
+        setStatus('Submitting to network...')
+        const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+        const result = await HORIZON_SERVER.submitTransaction(signedTx)
+        setStatus('Milestone submitted successfully!')
+        setTxHash(result.hash)
+        fireConfetti()
       if (selectedCampaign) {
         const ms = [...selectedCampaign.milestones]
         ms[index] = { ...ms[index], status: 1 }
@@ -814,12 +819,21 @@ function App() {
         const fresh = await fetchSingleCampaign(campaignAddr)
         if (fresh && fresh.name !== 'Loading...' && useStore.getState().selectedCampaign?.address === campaignAddr) setSelectedCampaign(fresh)
       }, 3000)
-    } catch (error) {
-      console.error('Submit milestone failed', error)
-      setStatus(parseContractError(error, 'submit'))
-    } finally {
-      setIsSending(false)
+        setIsSending(false)
+        return
+      } catch (error) {
+        const is400 = error?.response?.status === 400 || error?.message?.includes('400')
+        if (is400 && attempt < maxRetries - 1) {
+          setStatus(`Retrying... (${attempt + 1}/${maxRetries})`)
+          await new Promise(r => setTimeout(r, 2000))
+          continue
+        }
+        console.error('Submit milestone failed', error)
+        setStatus(parseContractError(error, 'submit'))
+        break
+      }
     }
+    setIsSending(false)
   }
 
   const voteOnMilestone = async (campaignAddr, index, approve) => {
@@ -834,6 +848,7 @@ function App() {
     setIsSending(true)
     setStatus(`Casting ${label.toLowerCase()} vote...`)
     setTxHash('')
+
     try {
       const account = await HORIZON_SERVER.loadAccount(publicKey)
       const campaignContract = new Contract(campaignAddr)
@@ -844,7 +859,7 @@ function App() {
         .addOperation(
           campaignContract.call(
             action,
-            nativeToScVal(new Address(publicKey), { type: 'address' }),
+            new Address(publicKey).toScVal(),
             nativeToScVal(index, { type: 'u32' })
           )
         )
@@ -972,6 +987,7 @@ function App() {
       setStatus('Milestone released successfully!')
       setTxHash(result.hash)
       fireConfetti()
+      await fetchBalance(publicKey)
 
       setTimeout(async () => {
         const still = useStore.getState().selectedCampaign
@@ -1030,6 +1046,7 @@ function App() {
       setStatus('Refund claimed successfully!')
       setTxHash(result.hash)
       fireConfetti()
+      await fetchBalance(publicKey)
 
       setTimeout(async () => {
         const still = useStore.getState().selectedCampaign
@@ -1040,6 +1057,62 @@ function App() {
     } catch (error) {
       console.error('Claim refund failed', error)
       setStatus(parseContractError(error, 'refund'))
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const withdrawFunds = async () => {
+    if (!publicKey || !selectedCampaign) return
+    setIsSending(true)
+    setStatus('Withdrawing released funds...')
+    setTxHash('')
+    try {
+      const account = await HORIZON_SERVER.loadAccount(publicKey)
+      const campaignContract = new Contract(selectedCampaign.address)
+      const available = Number(selectedCampaign.totalReleased || 0) - Number(selectedCampaign.totalWithdrawn || 0)
+
+      const transaction = new TransactionBuilder(account, {
+        fee: await HORIZON_SERVER.fetchBaseFee(),
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          campaignContract.call(
+            'withdraw',
+            new Address(publicKey).toScVal(),
+            nativeToScVal(available, { type: 'i128' })
+          )
+        )
+        .setTimeout(60)
+        .build()
+
+      setStatus('Simulating transaction...')
+      const simResult = await SOROBAN_SERVER.simulateTransaction(transaction)
+      if (simResult.error) throw simResult.error
+      const assembledTx = rpc.assembleTransaction(transaction, simResult).build()
+
+      setStatus('Waiting for wallet signature...')
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+        networkPassphrase: Networks.TESTNET,
+      })
+
+      setStatus('Submitting to network...')
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+      const result = await HORIZON_SERVER.submitTransaction(signedTx)
+      setStatus('Funds withdrawn successfully!')
+      setTxHash(result.hash)
+      fireConfetti()
+      await fetchBalance(publicKey)
+
+      setTimeout(async () => {
+        const still = useStore.getState().selectedCampaign
+        if (!still || still.address !== selectedCampaign.address) return
+        const fresh = await fetchSingleCampaign(selectedCampaign.address)
+        if (fresh && fresh.name !== 'Loading...') setSelectedCampaign(fresh)
+      }, 3000)
+    } catch (error) {
+      console.error('Withdraw failed', error)
+      setStatus(parseContractError(error, 'withdraw'))
     } finally {
       setIsSending(false)
     }
@@ -1539,6 +1612,24 @@ function App() {
                     <span>Released: {(Number(selectedCampaign.totalReleased || 0) / 10_000_000).toFixed(0)} XLM</span>
                     <span>Locked: {((Number(selectedCampaign.raised || 0) - Number(selectedCampaign.totalReleased || 0)) / 10_000_000).toFixed(0)} XLM</span>
                   </div>
+                  {(() => {
+                    const available = Number(selectedCampaign.totalReleased || 0) - Number(selectedCampaign.totalWithdrawn || 0)
+                    const isAdmin = publicKey && selectedCampaign.admin === publicKey
+                    if (available > 0 && isAdmin) {
+                      return (
+                        <div className="flex justify-center mt-3">
+                          <button
+                            onClick={withdrawFunds}
+                            disabled={isSending}
+                            className="text-xs px-4 py-2 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                          >
+                            Withdraw {(available / 10_000_000).toFixed(0)} XLM
+                          </button>
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
                 </div>
               )}
 

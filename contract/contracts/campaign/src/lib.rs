@@ -2,6 +2,7 @@
 #[cfg(test)]
 extern crate std;
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, TryFromVal, Val, Vec, IntoVal};
+use soroban_sdk::token::TokenClient;
 
 const VOTING_PERIOD: u64 = 7 * 24 * 60 * 60;
 const MIN_DONATION: i128 = 10_000_000; // 1 XLM minimum
@@ -32,6 +33,7 @@ pub enum DataKey {
     Deadline,
     TotalRaised,
     TotalReleased,
+    TotalWithdrawn,
     Milestones,
     TotalVoterWeight,
     TotalDonorCount,
@@ -44,6 +46,7 @@ pub enum DataKey {
     VotingDeadline(u32),
     RefundClaimed(u32, Address),
     NftContract,
+    TokenAddress,
     FeedbackCount,
     Feedback(u32),
     HasFeedback(Address),
@@ -94,6 +97,7 @@ impl Campaign {
         env.storage().instance().set(&DataKey::Milestones, &milestones);
         env.storage().instance().set(&DataKey::TotalVoterWeight, &0_i128);
         env.storage().instance().set(&DataKey::TotalDonorCount, &0_i128);
+        env.storage().instance().set(&DataKey::TokenAddress, &Address::from_str(&env, "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"));
 
         env.events().publish(
             (symbol_short!("created"),),
@@ -104,6 +108,9 @@ impl Campaign {
     pub fn donate(env: Env, donor: Address, amount: i128) {
         donor.require_auth();
         assert!(amount >= MIN_DONATION, "minimum donation is 1 XLM");
+
+        let token: Address = env.storage().instance().get(&DataKey::TokenAddress).unwrap();
+        TokenClient::new(&env, &token).transfer(&donor, &env.current_contract_address(), &amount);
 
         let total: i128 = env.storage().instance().get(&DataKey::TotalRaised).unwrap_or(0);
         env.storage().instance().set(&DataKey::TotalRaised, &(total + amount));
@@ -265,7 +272,41 @@ impl Campaign {
 
         env.storage().persistent().set(&DataKey::RefundClaimed(index, donor.clone()), &true);
 
+        let token: Address = env.storage().instance().get(&DataKey::TokenAddress).unwrap();
+        TokenClient::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &donor,
+            &refund_amount,
+        );
+
         env.events().publish((symbol_short!("refund"),), (donor, index, refund_amount));
+    }
+
+    pub fn withdraw(env: Env, to: Address, amount: i128) {
+        to.require_auth();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        assert!(to == admin, "only admin can withdraw");
+
+        let total_released: i128 = env.storage().instance().get(&DataKey::TotalReleased).unwrap_or(0);
+        let total_withdrawn: i128 = env.storage().instance().get(&DataKey::TotalWithdrawn).unwrap_or(0);
+        let available = total_released - total_withdrawn;
+        assert!(amount > 0, "amount must be positive");
+        assert!(amount <= available, "insufficient released funds");
+
+        env.storage().instance().set(&DataKey::TotalWithdrawn, &(total_withdrawn + amount));
+
+        let token: Address = env.storage().instance().get(&DataKey::TokenAddress).unwrap();
+        TokenClient::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &to,
+            &amount,
+        );
+
+        env.events().publish((symbol_short!("withdraw"),), (to, amount));
+    }
+
+    pub fn get_total_withdrawn(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::TotalWithdrawn).unwrap_or(0)
     }
 
     pub fn get_milestones(env: Env) -> Vec<Milestone> {
@@ -418,6 +459,37 @@ mod tests {
         (env, client)
     }
 
+    fn setup_token(env: &Env, contract_id: &Address, admin: &Address) -> Address {
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_addr = sac.address();
+        env.as_contract(contract_id, || {
+            env.storage().instance().set(&DataKey::TokenAddress, &token_addr);
+        });
+        token_addr
+    }
+
+    fn fund_address(env: &Env, token: &Address, addr: &Address, amount: i128) {
+        env.mock_all_auths();
+        let mut args = Vec::new(env);
+        args.push_back(addr.clone().into_val(env));
+        args.push_back(amount.into_val(env));
+        let _: Val = env.invoke_contract(token, &symbol_short!("mint"), args);
+    }
+
+    /// Fund donor and call donate. Amount funded is amount + 100% buffer.
+    fn do_donate(env: &Env, client: &CampaignClient<'static>, token: &Address, donor: &Address, amount: i128) {
+        fund_address(env, token, donor, amount * 2);
+        env.mock_all_auths();
+        client.donate(donor, &amount);
+    }
+
+    /// Fund donor and call donate with a custom buffer (fund_amount must be >= amount).
+    fn do_donate_with_fund(env: &Env, client: &CampaignClient<'static>, token: &Address, donor: &Address, amount: i128, fund_amount: i128) {
+        fund_address(env, token, donor, fund_amount);
+        env.mock_all_auths();
+        client.donate(donor, &amount);
+    }
+
     fn default_milestones(env: &Env) -> Vec<Vec<Val>> {
         let mut milestones = Vec::new(env);
 
@@ -439,6 +511,13 @@ mod tests {
     fn init_campaign(env: &Env, client: &CampaignClient<'static>, admin: &Address) {
         let factory = Address::generate(env);
         client.init(admin, &factory, &String::from_str(env, "Test Campaign"), &1_000_000_000, &1000000, &default_milestones(env));
+        setup_token(env, &client.address, admin);
+    }
+
+    fn read_token(env: &Env, client: &CampaignClient<'static>) -> Address {
+        env.as_contract(&client.address, || {
+            env.storage().instance().get(&DataKey::TokenAddress).unwrap()
+        })
     }
 
     fn set_timestamp(env: &Env, ts: u64) {
@@ -485,7 +564,9 @@ mod tests {
         let admin = Address::generate(&env);
         let donor = Address::generate(&env);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
+        fund_address(&env, &token, &donor, 1_000_000_000);
         env.mock_all_auths();
         client.donate(&donor, &500_000_000);
 
@@ -514,7 +595,9 @@ mod tests {
         let donor = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
+        fund_address(&env, &token, &donor, 1_000_000_000);
         env.mock_all_auths();
         client.donate(&donor, &500_000_000);
         client.submit_milestone(&admin, &0);
@@ -531,10 +614,10 @@ mod tests {
         let donor2 = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &600_000_000);
-        client.donate(&donor2, &400_000_000);
+        do_donate(&env, &client, &token, &donor1, 600_000_000);
+        do_donate(&env, &client, &token, &donor2, 400_000_000);
 
         client.submit_milestone(&admin, &0);
 
@@ -561,10 +644,10 @@ mod tests {
         let donor2 = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &600_000_000);
-        client.donate(&donor2, &400_000_000);
+        do_donate(&env, &client, &token, &donor1, 600_000_000);
+        do_donate(&env, &client, &token, &donor2, 400_000_000);
         client.submit_milestone(&admin, &0);
 
         client.vote_reject(&donor1, &0);
@@ -585,9 +668,9 @@ mod tests {
         let donor = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor, &1_000_000_000);
+        do_donate(&env, &client, &token, &donor, 1_000_000_000);
         client.submit_milestone(&admin, &0);
 
         client.vote_approve(&donor, &0);
@@ -608,10 +691,10 @@ mod tests {
         let donor2 = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &600_000_000);
-        client.donate(&donor2, &400_000_000);
+        do_donate(&env, &client, &token, &donor1, 600_000_000);
+        do_donate(&env, &client, &token, &donor2, 400_000_000);
         client.submit_milestone(&admin, &0);
 
         // Only 1 of 2 donors voted = 50%, need > 50%
@@ -633,10 +716,10 @@ mod tests {
         let donor2 = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &600_000_000);
-        client.donate(&donor2, &400_000_000);
+        do_donate(&env, &client, &token, &donor1, 600_000_000);
+        do_donate(&env, &client, &token, &donor2, 400_000_000);
         client.submit_milestone(&admin, &0);
 
         // Both vote = 100% quorum, both approve = 100% supermajority
@@ -658,11 +741,11 @@ mod tests {
         let donor3 = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &500_000_000);
-        client.donate(&donor2, &300_000_000);
-        client.donate(&donor3, &200_000_000);
+        do_donate(&env, &client, &token, &donor1, 500_000_000);
+        do_donate(&env, &client, &token, &donor2, 300_000_000);
+        do_donate(&env, &client, &token, &donor3, 200_000_000);
         client.submit_milestone(&admin, &0);
 
         // 2 of 3 voted = 66% >= 50% quorum
@@ -685,11 +768,11 @@ mod tests {
         let donor3 = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &500_000_000);
-        client.donate(&donor2, &300_000_000);
-        client.donate(&donor3, &200_000_000);
+        do_donate(&env, &client, &token, &donor1, 500_000_000);
+        do_donate(&env, &client, &token, &donor2, 300_000_000);
+        do_donate(&env, &client, &token, &donor3, 200_000_000);
         client.submit_milestone(&admin, &0);
 
         // 2 of 3 voted = 66% >= 50% quorum
@@ -712,9 +795,9 @@ mod tests {
         let non_donor = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor, &500_000_000);
+        do_donate(&env, &client, &token, &donor, 500_000_000);
         client.submit_milestone(&admin, &0);
 
         let result = client.try_vote_approve(&non_donor, &0);
@@ -728,9 +811,9 @@ mod tests {
         let donor = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor, &500_000_000);
+        do_donate(&env, &client, &token, &donor, 500_000_000);
         client.submit_milestone(&admin, &0);
 
         client.vote_approve(&donor, &0);
@@ -745,9 +828,9 @@ mod tests {
         let donor = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor, &500_000_000);
+        do_donate(&env, &client, &token, &donor, 500_000_000);
         client.submit_milestone(&admin, &0);
 
         set_timestamp(&env, 1000 + VOTING_PERIOD + 1);
@@ -763,10 +846,10 @@ mod tests {
         let donor2 = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &600_000_000);
-        client.donate(&donor2, &400_000_000);
+        do_donate(&env, &client, &token, &donor1, 600_000_000);
+        do_donate(&env, &client, &token, &donor2, 400_000_000);
         client.submit_milestone(&admin, &0);
 
         client.vote_reject(&donor1, &0);
@@ -789,9 +872,9 @@ mod tests {
         let donor = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor, &1_000_000_000);
+        do_donate(&env, &client, &token, &donor, 1_000_000_000);
         client.submit_milestone(&admin, &0);
         client.vote_reject(&donor, &0);
 
@@ -859,10 +942,10 @@ mod tests {
         let small = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&big, &900_000_000);
-        client.donate(&small, &100_000_000);
+        do_donate(&env, &client, &token, &big, 900_000_000);
+        do_donate(&env, &client, &token, &small, 100_000_000);
         client.submit_milestone(&admin, &0);
 
         // 2 of 2 voted = 100% quorum
@@ -884,9 +967,9 @@ mod tests {
         let donor = Address::generate(&env);
         set_timestamp(&env, 1000);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor, &500_000_000);
+        do_donate(&env, &client, &token, &donor, 500_000_000);
         client.submit_milestone(&admin, &0);
 
         let result = client.try_release_milestone(&0);
@@ -900,16 +983,15 @@ mod tests {
         let donor1 = Address::generate(&env);
         let donor2 = Address::generate(&env);
         init_campaign(&env, &client, &admin);
+        let token = read_token(&env, &client);
 
-        env.mock_all_auths();
-        client.donate(&donor1, &500_000_000);
+        do_donate(&env, &client, &token, &donor1, 500_000_000);
         assert_eq!(client.get_total_donor_count(), 1);
 
-        client.donate(&donor2, &300_000_000);
+        do_donate(&env, &client, &token, &donor2, 300_000_000);
         assert_eq!(client.get_total_donor_count(), 2);
 
-        // Same donor donates again, count should not increase
-        client.donate(&donor1, &200_000_000);
+        do_donate(&env, &client, &token, &donor1, 200_000_000);
         assert_eq!(client.get_total_donor_count(), 2);
     }
 

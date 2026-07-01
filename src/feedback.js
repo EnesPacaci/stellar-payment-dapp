@@ -9,34 +9,56 @@ export async function submitOnChainFeedback(publicKey, campaignAddress, rating, 
   if (!publicKey) throw new Error('No wallet connected')
   if (!campaignAddress) throw new Error('No campaign selected')
 
-  const campaignContract = new Contract(campaignAddress)
-  const account = await HORIZON_SERVER.loadAccount(publicKey)
+  const maxRetries = 3
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const campaignContract = new Contract(campaignAddress)
+      const account = await HORIZON_SERVER.loadAccount(publicKey)
 
-  const tx = new TransactionBuilder(account, {
-    fee: '500',
-    networkPassphrase: Networks.TESTNET,
-  })
-    .addOperation(
-      campaignContract.call(
-        'submit_feedback',
-        new Address(publicKey).toScVal(),
-        nativeToScVal(rating, { type: 'u32' }),
-        nativeToScVal(comment || '', { type: 'string' })
-      )
-    )
-    .setTimeout(60)
-    .build()
+      const tx = new TransactionBuilder(account, {
+        fee: '500',
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          campaignContract.call(
+            'submit_feedback',
+            new Address(publicKey).toScVal(),
+            nativeToScVal(rating, { type: 'u32' }),
+            nativeToScVal(comment || '', { type: 'string' })
+          )
+        )
+        .setTimeout(60)
+        .build()
 
-  const simResult = await SOROBAN_SERVER.simulateTransaction(tx)
-  if (simResult.error) throw new Error(simResult.error?.message || simResult.error || 'Simulation failed')
+      let simResult
+      try {
+        simResult = await SOROBAN_SERVER.simulateTransaction(tx)
+      } catch (err) {
+        const detail = err?.response?.data || err?.message || err
+        throw new Error('Simulation failed: ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)))
+      }
+      if (simResult.error) {
+        const detail = simResult.error?.message || simResult.error?.toString() || JSON.stringify(simResult.error)
+        throw new Error('Contract error: ' + detail)
+      }
 
-  const assembledTx = rpc.assembleTransaction(tx, simResult).build()
-  const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
-    networkPassphrase: Networks.TESTNET,
-  })
+      const assembledTx = rpc.assembleTransaction(tx, simResult).build()
+      const { signedTxXdr } = await StellarWalletsKit.signTransaction(assembledTx.toXDR(), {
+        networkPassphrase: Networks.TESTNET,
+      })
 
-  const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
-  await HORIZON_SERVER.submitTransaction(signedTx)
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET)
+      await HORIZON_SERVER.submitTransaction(signedTx)
+      return
+    } catch (err) {
+      const is400 = err?.response?.status === 400 || err?.message?.includes('400')
+      if (is400 && attempt < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 2000))
+        continue
+      }
+      throw err
+    }
+  }
 }
 
 async function invokeCampaignRead(campaignAddress, fn, ...args) {
